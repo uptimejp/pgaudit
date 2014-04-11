@@ -1,0 +1,44 @@
+What we could do
+================
+
+Event sources
+
+  For DDL and other non-DML:
+
+    - A ClientAuthentication_hook can record login events.
+
+    - For (some, but not all) CREATE/ALTER/DROP statements: event
+    triggers. We could use an object_access_hook, but there seems to be
+    little point, we'd be reinventing what event triggers already do.
+
+    - For function execution (and "namespace search", but that is
+    probably not interesting), we can use an object_access_hook.
+
+    - For other utility commands, a ProcessUtility_hook. Whatever can be
+    handled by event triggers should be, though, because we don't want
+    to reinvent code at every turn to examine a parse tree. But we can't
+    avoid it altogether because we need to log e.g. GRANT/REVOKE.
+
+  For DML:
+
+    - An ExecutorCheckPerms_hook can give relation-level and
+    column-level information about SELECT/INSERT/UPDATE/DELETE, via a
+    List of RangeTblEntry *s and rte->requiredPerms. No access to the
+    statement or to the changed data, however.
+
+    - A logical decoding output plugin can give row-level information
+    about INSERT/UPDATE/DELETE, but nothing for SELECT.
+
+Event sinks
+
+    - For now, only ereport()
+    - Later, log to a different file and to a table.
+    - contrib/sepgsql emits audit events to the postgres logfile.
+
+What we're doing
+================
+
+1. We'll use event triggers for those events they support
+2. We'll use a ProcessUtility_hook to log other DDL.
+3. We'll use an ExecutorCheckPerms_hook to log SELECT/DML.
+4. We'll use a ClientAuthentication_hook for login events.
