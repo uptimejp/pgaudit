@@ -1,5 +1,6 @@
 # pgaudit/Makefile
 
+MODULES = pgaudit
 EXTENSION = pgaudit
 
 DATA = pgaudit--0.1.sql
