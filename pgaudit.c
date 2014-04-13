@@ -10,10 +10,14 @@
 #include "pgtime.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
+#include "utils/guc.h"
+#include "tcop/utility.h"
 
 #define TSBUF_LEN 128
 
 PG_MODULE_MAGIC;
+
+void _PG_init(void);
 
 Datum pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS);
 
@@ -132,4 +136,105 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 	MemoryContextSwitchTo(oldcontext);
 	MemoryContextDelete(tmpcontext);
 	PG_RETURN_NULL();
+}
+
+static ExecutorCheckPerms_hook_type next_exec_check_perms_hook = NULL;
+static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
+static ClientAuthentication_hook_type next_client_auth_hook = NULL;
+
+/*
+ * GUC: pgaudit.enabled = (on|off)
+ */
+static bool pgaudit_enabled;
+
+static void
+pgaudit_object_access(ObjectAccessType access,
+					  Oid classId,
+					  Oid objectId,
+					  int subId,
+					  void *arg)
+{
+	if (next_object_access_hook)
+		(*next_object_access_hook) (access, classId, objectId, subId, arg);
+}
+
+static bool
+pgaudit_exec_check_perms(List *rangeTabls, bool abort)
+{
+	if (next_exec_check_perms_hook &&
+		!(*next_exec_check_perms_hook) (rangeTabls, abort))
+		return false;
+
+	return true;
+}
+
+static void
+pgaudit_client_auth(Port *port, int status)
+{
+	if (next_client_auth_hook)
+		(*next_client_auth_hook) (port, status);
+}
+
+static void
+pgaudit_utility_command(Node *parsetree,
+						const char *queryString,
+						ProcessUtilityContext context,
+						ParamListInfo params,
+						DestReceiver *dest,
+						char *completionTag)
+{
+	PG_TRY();
+	{
+		if (next_ProcessUtility_hook)
+			(*next_ProcessUtility_hook) (parsetree, queryString,
+										 context, params,
+										 dest, completionTag);
+		else
+			standard_ProcessUtility(parsetree, queryString,
+									context, params,
+									dest, completionTag);
+	}
+	PG_CATCH();
+	{
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
+}
+
+void
+_PG_init(void)
+{
+	if (IsUnderPostmaster)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("pgaudit must be loaded via shared_preload_libraries")));
+
+	/*
+	 * pgaudit.enabled = (on|off)
+	 *
+	 * This variable controls performing mode of SE-PostgreSQL on user's
+	 * session.
+	 */
+	DefineCustomBoolVariable("pgaudit.enabled",
+							 "Enable auditing",
+							 NULL,
+							 &pgaudit_enabled,
+							 false,
+							 PGC_SIGHUP,
+							 GUC_NOT_IN_SAMPLE,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	next_client_auth_hook = ClientAuthentication_hook;
+	ClientAuthentication_hook = pgaudit_client_auth;
+
+	next_object_access_hook = object_access_hook;
+	object_access_hook = pgaudit_object_access;
+
+	next_exec_check_perms_hook = ExecutorCheckPerms_hook;
+	ExecutorCheckPerms_hook = pgaudit_exec_check_perms;
+
+	next_ProcessUtility_hook = ProcessUtility_hook;
+	ProcessUtility_hook = pgaudit_utility_command;
 }
