@@ -177,11 +177,82 @@ pgaudit_exec_check_perms(List *rangeTabls, bool abort)
 	return true;
 }
 
+
+/* Log authentication events
+ *
+ * Notes:
+ *  - for some authentication types, ClientAuthentication() [libfq/auth.c]
+ *    issues an 'ereport(FATAL)' before the hook is called, meaning
+ *    certain authentication errors in some circumstances can't be handled here
+ *  - status = -2 [STATUS_EOF]: authentication initiated but no credentials supplied
+ *  - status = -1 [STATUS_ERROR]: credentials supplied, authentication failed
+ *  - status =  0 [STATUS_OK: credentials supplied, authentication succeeded
+ */
+
 static void
 pgaudit_client_auth(Port *port, int status)
 {
-	if (next_client_auth_hook)
-		(*next_client_auth_hook) (port, status);
+	const char *auth_method = NULL;
+
+	if(pgaudit_enabled == false)
+	{
+		if (next_client_auth_hook)
+			(*next_client_auth_hook) (port, status);
+		return;
+	}
+
+	switch(port->hba->auth_method)
+	{
+		case uaReject:
+		case uaImplicitReject:
+			auth_method = "reject";
+			break;
+		case uaTrust:
+			auth_method = "trust";
+			break;
+		case uaIdent:
+			auth_method = "ident";
+			break;
+		case uaPassword:
+			auth_method = "password";
+			break;
+		case uaMD5:
+			auth_method = "md5";
+			break;
+		case uaGSS:
+			auth_method = "gss";
+			break;
+		case uaSSPI:
+			auth_method = "sspi";
+			break;
+		case uaPAM:
+			auth_method = "pam";
+			break;
+		case uaLDAP:
+			auth_method = "ldap";
+			break;
+		case uaCert:
+			auth_method = "cert";
+			break;
+		case uaRADIUS:
+			auth_method = "radius";
+			break;
+		case uaPeer:
+			auth_method = "peer";
+			break;
+	}
+
+	ereport(LOG,
+			(errmsg(
+				"%s,%s,%s,%s,%i",
+				port->user_name,
+				port->remote_host,
+				auth_method,
+				port->database_name,
+				status
+				)
+				)
+		);
 }
 
 static void
