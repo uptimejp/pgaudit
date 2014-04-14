@@ -30,10 +30,12 @@ static bool pgaudit_enabled;
 char tsbuf[TSBUF_LEN];
 
 Datum pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS);
+Datum pgaudit_func_sql_drop(PG_FUNCTION_ARGS);
 static char *make_timestamp(void);
 
-
 PG_FUNCTION_INFO_V1(pgaudit_func_ddl_command_end);
+PG_FUNCTION_INFO_V1(pgaudit_func_sql_drop);
+
 Datum
 pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 {
@@ -144,6 +146,72 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 }
 
 
+Datum
+pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
+{
+	EventTriggerData *trigdata;
+	SPITupleTable	 *spi_tuptable;
+	TupleDesc		  spi_tupdesc;
+	int               ret, row, proc;
+
+	const char *query_dropped_objects =
+		"SELECT classid, objid, objsubid, object_type, schema_name, object_name, object_identity" \
+		"  FROM pg_event_trigger_dropped_objects()";
+
+	if(pgaudit_enabled == false)
+		PG_RETURN_NULL();
+
+	elog(DEBUG1, "pgaudit_func_sql_drop");
+
+	trigdata = (EventTriggerData *) fcinfo->context;
+
+	/* Connect to SPI manager */
+	if ((ret = SPI_connect()) < 0)
+		/* internal error */
+		elog(ERROR, "pgaudit_func_sql_drop: SPI_connect returned %d", ret);
+
+	/* XXX check return value */
+	ret = SPI_execute(query_dropped_objects, true, 0);
+	proc = SPI_processed;
+
+	/* XXX Not sure if this should ever happen */
+	if(proc == 0)
+	{
+		elog(DEBUG1, "pgaudit_func_sql_drop() spi err");
+		SPI_finish();
+		PG_RETURN_NULL();
+	}
+
+	spi_tuptable = SPI_tuptable;
+	spi_tupdesc = spi_tuptable->tupdesc;
+
+	for (row = 0; row < proc; row++)
+	{
+		HeapTuple  spi_tuple;
+
+		elog(INFO, "row %i", row);
+		spi_tuple = spi_tuptable->vals[row];
+
+		ereport(LOG,
+				(errmsg(
+					"%s,%s,%s,%s,%s",
+					make_timestamp(),
+					GetUserNameFromId(GetSessionUserId()),
+					GetUserNameFromId(GetUserId()),
+					SPI_getvalue(spi_tuple, spi_tupdesc, 7),
+					trigdata->tag
+					),
+				 errhidestmt(true)
+					)
+			);
+
+	}
+
+	SPI_finish();
+	PG_RETURN_NULL();
+}
+
+
 /* Quick'n'dirty timestamp generation */
 
 static char *make_timestamp(void)
@@ -199,7 +267,7 @@ pgaudit_exec_check_perms(List *rangeTabls, bool abort)
  *    certain authentication errors in some circumstances can't be handled here
  *  - status = -2 [STATUS_EOF]: authentication initiated but no credentials supplied
  *  - status = -1 [STATUS_ERROR]: credentials supplied, authentication failed
- *  - status =  0 [STATUS_OK: credentials supplied, authentication succeeded
+ *  - status =  0 [STATUS_OK]: credentials supplied, authentication succeeded
  */
 
 static void
