@@ -2,11 +2,14 @@
 
 #include <time.h>
 
+#include "catalog/objectaccess.h"
 #include "commands/event_trigger.h"
+#include "executor/executor.h"
 #include "executor/spi.h"
 #include "miscadmin.h"
 #include "lib/stringinfo.h"
 #include "fmgr.h"
+#include "libpq/auth.h"
 #include "pgtime.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
@@ -141,6 +144,7 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 static ExecutorCheckPerms_hook_type next_exec_check_perms_hook = NULL;
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static ClientAuthentication_hook_type next_client_auth_hook = NULL;
+static object_access_hook_type next_object_access_hook = NULL;
 
 /*
  * GUC: pgaudit.enabled = (on|off)
@@ -212,8 +216,7 @@ _PG_init(void)
 	/*
 	 * pgaudit.enabled = (on|off)
 	 *
-	 * This variable controls performing mode of SE-PostgreSQL on user's
-	 * session.
+	 * This variable controls whether auditing is enabled
 	 */
 	DefineCustomBoolVariable("pgaudit.enabled",
 							 "Enable auditing",
