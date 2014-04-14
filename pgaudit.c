@@ -27,7 +27,11 @@ void _PG_init(void);
  */
 static bool pgaudit_enabled;
 
+char tsbuf[TSBUF_LEN];
+
 Datum pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS);
+static char *make_timestamp(void);
+
 
 PG_FUNCTION_INFO_V1(pgaudit_func_ddl_command_end);
 Datum
@@ -40,9 +44,6 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 	SPITupleTable	 *spi_tuptable;
 	TupleDesc		  spi_tupdesc;
 	int				  row;
-
-	char			  tsbuf[TSBUF_LEN];
-	pg_time_t timestamp = (pg_time_t) time(NULL);
 
 	MemoryContext tmpcontext;
 	MemoryContext oldcontext;
@@ -88,13 +89,6 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 		PG_RETURN_NULL();
 	}
 
-	/* XXX what time / output format do we want?
-	   I.e. do we want to report the report time, or the
-	   statement timestamp, etc.?
-	 */
-	pg_strftime(tsbuf, TSBUF_LEN, "%Y-%m-%d %H:%M:%S %Z",
-				pg_localtime(&timestamp, log_timezone));
-
 	spi_tuptable = SPI_tuptable;
 	spi_tupdesc = spi_tuptable->tupdesc;
 
@@ -112,7 +106,7 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 		ereport(LOG,
 				(errmsg(
 					"%s,%s,%s,%s,%s",
-					tsbuf,
+					make_timestamp(),
 					GetUserNameFromId(GetSessionUserId()),
 					GetUserNameFromId(GetUserId()),
 					SPI_getvalue(spi_tuple, spi_tupdesc, 4),
@@ -148,6 +142,25 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 	MemoryContextDelete(tmpcontext);
 	PG_RETURN_NULL();
 }
+
+
+/* Quick'n'dirty timestamp generation */
+
+static char *make_timestamp(void)
+{
+
+	pg_time_t timestamp = (pg_time_t) time(NULL);
+
+	/* XXX what time / output format do we want?
+	   I.e. do we want to report the report time, or the
+	   statement timestamp, etc.?
+	 */
+	pg_strftime(tsbuf, TSBUF_LEN, "%Y-%m-%d %H:%M:%S %Z",
+				pg_localtime(&timestamp, log_timezone));
+
+	return tsbuf;
+}
+
 
 static ExecutorCheckPerms_hook_type next_exec_check_perms_hook = NULL;
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
@@ -255,6 +268,11 @@ pgaudit_client_auth(Port *port, int status)
 		);
 }
 
+
+/* Log utility commands which cannot handled by event triggers,
+ * particularly those which affect global objects
+ */
+
 static void
 pgaudit_utility_command(Node *parsetree,
 						const char *queryString,
@@ -263,6 +281,132 @@ pgaudit_utility_command(Node *parsetree,
 						DestReceiver *dest,
 						char *completionTag)
 {
+	bool audit_command = false;
+
+	if(pgaudit_enabled == false)
+	{
+		PG_TRY();
+		{
+			if (next_ProcessUtility_hook)
+				(*next_ProcessUtility_hook) (parsetree, queryString,
+											 context, params,
+											 dest, completionTag);
+			else
+				standard_ProcessUtility(parsetree, queryString,
+										context, params,
+										dest, completionTag);
+		}
+		PG_CATCH();
+		{
+			PG_RE_THROW();
+		}
+		PG_END_TRY();
+		return;
+	}
+
+	switch (nodeTag(parsetree))
+	{
+		case T_GrantStmt:
+		case T_GrantRoleStmt:
+		case T_TransactionStmt:
+		case T_PlannedStmt:
+		case T_ClosePortalStmt:
+		case T_FetchStmt:
+		case T_DoStmt:
+		case T_CreateTableSpaceStmt:
+		case T_DropTableSpaceStmt:
+		case T_AlterTableSpaceOptionsStmt:
+		case T_AlterTableSpaceMoveStmt:
+		case T_TruncateStmt:
+		case T_CommentStmt:
+		case T_SecLabelStmt:
+		case T_CopyStmt:
+		case T_PrepareStmt:
+		case T_ExecuteStmt:
+		case T_DeallocateStmt:
+		case T_CreatedbStmt:
+		case T_AlterDatabaseStmt:
+		case T_AlterDatabaseSetStmt:
+		case T_DropdbStmt:
+		case T_NotifyStmt:
+		case T_ListenStmt:
+		case T_UnlistenStmt:
+		case T_LoadStmt:
+		case T_ClusterStmt:
+		case T_VacuumStmt:
+		case T_ExplainStmt:
+		case T_AlterSystemStmt:
+		case T_VariableSetStmt:
+		case T_VariableShowStmt:
+		case T_DiscardStmt:
+		case T_CreateEventTrigStmt:
+		case T_AlterEventTrigStmt:
+		case T_CreateRoleStmt:
+		case T_AlterRoleStmt:
+		case T_AlterRoleSetStmt:
+		case T_DropRoleStmt:
+		case T_ReassignOwnedStmt:
+		case T_LockStmt:
+		case T_ConstraintsSetStmt:
+		case T_CheckPointStmt:
+		case T_ReindexStmt:
+			audit_command = true;
+			break;
+
+			/*
+			 * The following statements are supported by Event Triggers only
+			 * in some cases
+			 */
+
+		case T_DropStmt:
+			{
+				DropStmt   *stmt = (DropStmt *) parsetree;
+
+				if (!EventTriggerSupportsObjectType(stmt->removeType))
+					audit_command = true;
+			}
+			break;
+		case T_RenameStmt:
+			{
+				RenameStmt *stmt = (RenameStmt *) parsetree;
+
+				if (!EventTriggerSupportsObjectType(stmt->renameType))
+					audit_command = true;
+			}
+		case T_AlterObjectSchemaStmt:
+			{
+				AlterObjectSchemaStmt *stmt = (AlterObjectSchemaStmt *) parsetree;
+
+				if (!EventTriggerSupportsObjectType(stmt->objectType))
+					audit_command = true;
+			}
+		case T_AlterOwnerStmt:
+			{
+				AlterOwnerStmt *stmt = (AlterOwnerStmt *) parsetree;
+
+				if (!EventTriggerSupportsObjectType(stmt->objectType))
+					audit_command = true;
+			}
+			break;
+		default:
+			elog(DEBUG1, "Not handling node type: %d",
+					 (int) nodeTag(parsetree));
+				break;
+	}
+
+	if(audit_command == true)
+		ereport(LOG,
+				(errmsg(
+					"pgaudit_utility_command(): %s,%s,%s,%s",
+					make_timestamp(),
+					GetUserNameFromId(GetSessionUserId()),
+					GetUserNameFromId(GetUserId()),
+					queryString
+					),
+				 errhidestmt(true)
+					)
+			);
+
 	PG_TRY();
 	{
 		if (next_ProcessUtility_hook)
@@ -280,6 +424,7 @@ pgaudit_utility_command(Node *parsetree,
 	}
 	PG_END_TRY();
 }
+
 
 void
 _PG_init(void)
