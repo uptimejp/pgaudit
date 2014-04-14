@@ -22,6 +22,11 @@ PG_MODULE_MAGIC;
 
 void _PG_init(void);
 
+/*
+ * GUC: pgaudit.enabled = (on|off)
+ */
+static bool pgaudit_enabled;
+
 Datum pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(pgaudit_func_ddl_command_end);
@@ -41,6 +46,9 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 
 	MemoryContext tmpcontext;
 	MemoryContext oldcontext;
+
+	if(pgaudit_enabled == false)
+		PG_RETURN_NULL();
 
 	tmpcontext = AllocSetContextCreate(CurrentMemoryContext,
 									   "pgaudit_func_ddl_command_end temporary context",
@@ -146,10 +154,7 @@ static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static ClientAuthentication_hook_type next_client_auth_hook = NULL;
 static object_access_hook_type next_object_access_hook = NULL;
 
-/*
- * GUC: pgaudit.enabled = (on|off)
- */
-static bool pgaudit_enabled;
+
 
 static void
 pgaudit_object_access(ObjectAccessType access,
