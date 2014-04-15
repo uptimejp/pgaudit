@@ -40,15 +40,16 @@ Datum
 pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 {
 	EventTriggerData *trigdata;
-	StringInfoData	  buf;
-	int				  ret;
-	int				  proc;
+	int               ret, row, proc;
 	SPITupleTable	 *spi_tuptable;
 	TupleDesc		  spi_tupdesc;
-	int				  row;
 
 	MemoryContext tmpcontext;
 	MemoryContext oldcontext;
+
+	const char *query_get_creation_commands = \
+		"SELECT classid, objid, objsubid, object_type, schema, identity, command" \
+		"  FROM pg_event_trigger_get_creation_commands()";
 
 	if(pgaudit_enabled == false)
 		PG_RETURN_NULL();
@@ -71,15 +72,8 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 		elog(ERROR, "pgaudit_func_ddl_command_end: SPI_connect returned %d", ret);
 
 
-	initStringInfo(&buf);
-	appendStringInfo(
-		&buf,
-		"SELECT classid, objid, objsubid, object_type, schema, identity, command"\
-		"  FROM pg_event_trigger_get_creation_commands()"
-		);
-
 	/* XXX check return value */
-	ret = SPI_execute(buf.data, true, 0);
+	ret = SPI_execute(query_get_creation_commands, true, 0);
 	proc = SPI_processed;
 
 	/* XXX Not sure if this should ever happen */
@@ -136,7 +130,6 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 				 errhidestmt(true)
 					)
 			);
-
 	}
 
 	SPI_finish();
@@ -154,6 +147,9 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 	TupleDesc		  spi_tupdesc;
 	int               ret, row, proc;
 
+	MemoryContext tmpcontext;
+	MemoryContext oldcontext;
+
 	const char *query_dropped_objects =
 		"SELECT classid, objid, objsubid, object_type, schema_name, object_name, object_identity" \
 		"  FROM pg_event_trigger_dropped_objects()";
@@ -162,6 +158,12 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 		PG_RETURN_NULL();
 
 	elog(DEBUG1, "pgaudit_func_sql_drop");
+	tmpcontext = AllocSetContextCreate(CurrentMemoryContext,
+									   "pgaudit_func_sql_drop temporary context",
+									   ALLOCSET_DEFAULT_MINSIZE,
+									   ALLOCSET_DEFAULT_INITSIZE,
+									   ALLOCSET_DEFAULT_MAXSIZE);
+	oldcontext = MemoryContextSwitchTo(tmpcontext);
 
 	trigdata = (EventTriggerData *) fcinfo->context;
 
@@ -177,7 +179,9 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 	/* XXX Not sure if this should ever happen */
 	if(proc == 0)
 	{
-		elog(DEBUG1, "pgaudit_func_sql_drop() spi err");
+		elog(DEBUG1, "pgaudit_func_sql_drop() spi error");
+		MemoryContextSwitchTo(oldcontext);
+		MemoryContextDelete(tmpcontext);
 		SPI_finish();
 		PG_RETURN_NULL();
 	}
@@ -189,7 +193,6 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 	{
 		HeapTuple  spi_tuple;
 
-		elog(INFO, "row %i", row);
 		spi_tuple = spi_tuptable->vals[row];
 
 		ereport(LOG,
@@ -208,6 +211,8 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 	}
 
 	SPI_finish();
+	MemoryContextSwitchTo(oldcontext);
+	MemoryContextDelete(tmpcontext);
 	PG_RETURN_NULL();
 }
 
