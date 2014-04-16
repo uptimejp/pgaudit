@@ -328,6 +328,12 @@ pgaudit_client_auth(Port *port, int status)
 			break;
 	}
 
+	/* TODO: can we get the role's OID? It might be useful to
+	 * log that (e.g. to help identify roles even if the name
+	 * was changed), however at this point in the authentication process
+	 * GetUserId() returns 0
+	 */
+
 	ereport(LOG,
 			(errmsg(
 				"%s,%s,%s,%s,%i",
