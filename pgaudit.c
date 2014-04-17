@@ -196,6 +196,9 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 									   ALLOCSET_DEFAULT_MAXSIZE);
 	oldcontext = MemoryContextSwitchTo(tmpcontext);
 
+	if (!CALLED_AS_EVENT_TRIGGER(fcinfo))  /* internal error */
+		elog(ERROR, "not fired by event trigger manager");
+
 	trigdata = (EventTriggerData *) fcinfo->context;
 
 	/* Connect to SPI manager */
