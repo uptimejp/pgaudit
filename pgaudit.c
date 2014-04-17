@@ -1,3 +1,36 @@
+/*-------------------------------------------------------------------------
+ *
+ * pgaudit.c
+ *		  experimental auditing extension
+ *
+ * Configuration:
+ *   pgaudit.enabled = (on|off)
+ *
+ * Output:
+ *   Logged audit events are currently dumped to the default log file
+ *   in an adhoc, pseudo-CSV format prefixed with '[AUDIT]:'.
+ *
+ *   [AUDIT]:event,timestamp,user,effective_user,object_identity,object_type,trigger_tag,command_text
+ *   [AUDIT]:LOGIN,timestamp,user_name,remote_host,auth_method,database_name,status
+ *
+ *   Example:
+ *   [AUDIT]:DDL_CREATE,2014-04-17 15:39:21 JST,ibarwick,ibarwick,public.foo,table,CREATE TABLE,CREATE  TABLE  public.foo (id pg_catalog.int4   )   WITH (oids=OFF)
+ *
+ *   'event' is one of:
+ *      - DDL_CREATE: CREATE or ALTER DDL event
+ *      - DDL_DROP:   DROP event
+ *      - STMT_OTHER: command not handled by an event trigger
+ *      - LOGIN:      user authentication
+ *
+ *   !! the current output format is very arbitrary and subject to change !!
+ *
+ * Caveats:
+ *   - deparsed query text only available for 'DDL_CREATE' events
+ *   - currently 'ALTER TABLE ... DROP ...' is logged both as 'DDL_CREATE' and 'DDL_DROP'
+ *
+ *-------------------------------------------------------------------------
+ */
+
 #include "postgres.h"
 
 #include <time.h>
@@ -99,34 +132,33 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 
 		spi_tuple = spi_tuptable->vals[row];
 
-		ereport(LOG,
-				(errmsg(
-					"%s,%s,%s,%s,%s",
-					make_timestamp(),
-					GetUserNameFromId(GetSessionUserId()),
-					GetUserNameFromId(GetUserId()),
-					SPI_getvalue(spi_tuple, spi_tupdesc, 4),
-					trigdata->tag
-					),
-				 errhidestmt(true)
-					)
-			);
 
-		json = SPI_getbinval(spi_tuple, spi_tupdesc, 7, &isnull);
-
+		/* Temporarily dump the raw JSON rendering for debugging */
 		command_formatted = SPI_getvalue(spi_tuple, spi_tupdesc, 7);
-		ereport(LOG,
+
+		ereport(DEBUG1,
 				(errmsg("%s", command_formatted),
 				 errhidestmt(true)
 					)
 			);
 
+		json = SPI_getbinval(spi_tuple, spi_tupdesc, 7, &isnull);
 		command = DirectFunctionCall1(pg_event_trigger_expand_command,
 									  json);
 
 		command_text = TextDatumGetCString(command);
+
 		ereport(LOG,
-				(errmsg("%s", command_text),
+				(errmsg(
+					"[AUDIT]:DDL_CREATE,%s,%s,%s,%s,%s,%s,%s",
+					make_timestamp(),
+					GetUserNameFromId(GetSessionUserId()),
+					GetUserNameFromId(GetUserId()),
+					SPI_getvalue(spi_tuple, spi_tupdesc, 6), /* object identity */
+					SPI_getvalue(spi_tuple, spi_tupdesc, 4), /* object type */
+					trigdata->tag,
+					command_text
+					),
 				 errhidestmt(true)
 					)
 			);
@@ -157,7 +189,6 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 	if(pgaudit_enabled == false)
 		PG_RETURN_NULL();
 
-	elog(DEBUG1, "pgaudit_func_sql_drop");
 	tmpcontext = AllocSetContextCreate(CurrentMemoryContext,
 									   "pgaudit_func_sql_drop temporary context",
 									   ALLOCSET_DEFAULT_MINSIZE,
@@ -179,7 +210,7 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 	/* XXX Not sure if this should ever happen */
 	if(proc == 0)
 	{
-		elog(DEBUG1, "pgaudit_func_sql_drop() spi error");
+		elog(DEBUG1, "pgaudit_func_sql_drop(): SPI error");
 		MemoryContextSwitchTo(oldcontext);
 		MemoryContextDelete(tmpcontext);
 		SPI_finish();
@@ -197,11 +228,12 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 
 		ereport(LOG,
 				(errmsg(
-					"%s,%s,%s,%s,%s",
+					"[AUDIT]:DDL_DROP,%s,%s,%s,%s,%s,%s,",
 					make_timestamp(),
 					GetUserNameFromId(GetSessionUserId()),
 					GetUserNameFromId(GetUserId()),
-					SPI_getvalue(spi_tuple, spi_tupdesc, 7),
+					SPI_getvalue(spi_tuple, spi_tupdesc, 7), /* object identity */
+					SPI_getvalue(spi_tuple, spi_tupdesc, 4), /* object type */
 					trigdata->tag
 					),
 				 errhidestmt(true)
@@ -326,6 +358,9 @@ pgaudit_client_auth(Port *port, int status)
 		case uaPeer:
 			auth_method = "peer";
 			break;
+		default:
+			/* Just in case a new method gets added... */
+			auth_method = "unknown";
 	}
 
 	/* TODO: can we get the role's OID? It might be useful to
@@ -336,7 +371,8 @@ pgaudit_client_auth(Port *port, int status)
 
 	ereport(LOG,
 			(errmsg(
-				"%s,%s,%s,%s,%i",
+				"[AUDIT]:LOGIN,%s,%s,%s,%s,%s,%i",
+				make_timestamp(),
 				port->user_name,
 				port->remote_host,
 				auth_method,
@@ -385,6 +421,9 @@ pgaudit_utility_command(Node *parsetree,
 
 	switch (nodeTag(parsetree))
 	{
+		/*
+		 * The following statements are not handled by event triggers:
+		 */
 		case T_GrantStmt:
 		case T_GrantRoleStmt:
 		case T_TransactionStmt:
@@ -433,8 +472,8 @@ pgaudit_utility_command(Node *parsetree,
 			break;
 
 			/*
-			 * The following statements are supported by Event Triggers only
-			 * in some cases
+			 * The following statements are supported by event triggers only
+			 * in some cases:
 			 */
 
 		case T_DropStmt:
@@ -468,15 +507,15 @@ pgaudit_utility_command(Node *parsetree,
 			}
 			break;
 		default:
-			elog(DEBUG1, "Not handling node type: %d",
+			elog(DEBUG1, "pgaudit_utility_command(): not handling node type: %d",
 					 (int) nodeTag(parsetree));
-				break;
+			break;
 	}
 
 	if(audit_command == true)
 		ereport(LOG,
 				(errmsg(
-					"pgaudit_utility_command(): %s,%s,%s,%s",
+					"[AUDIT]:STMT_OTHER,%s,%s,%s,other,,%s,",
 					make_timestamp(),
 					GetUserNameFromId(GetSessionUserId()),
 					GetUserNameFromId(GetUserId()),
