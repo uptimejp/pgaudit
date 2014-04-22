@@ -318,7 +318,7 @@ pgaudit_client_auth(Port *port, int status)
 	if (next_client_auth_hook)
 		(*next_client_auth_hook) (port, status);
 
-	if (pgaudit_enabled == false)
+	if (!pgaudit_enabled)
 		return;
 
 	switch(port->hba->auth_method)
@@ -400,26 +400,25 @@ pgaudit_utility_command(Node *parsetree,
 {
 	bool audit_command = false;
 
-	if(pgaudit_enabled == false)
+	PG_TRY();
 	{
-		PG_TRY();
-		{
-			if (next_ProcessUtility_hook)
-				(*next_ProcessUtility_hook) (parsetree, queryString,
-											 context, params,
-											 dest, completionTag);
-			else
-				standard_ProcessUtility(parsetree, queryString,
-										context, params,
-										dest, completionTag);
-		}
-		PG_CATCH();
-		{
-			PG_RE_THROW();
-		}
-		PG_END_TRY();
-		return;
+		if (next_ProcessUtility_hook)
+			(*next_ProcessUtility_hook) (parsetree, queryString,
+										 context, params,
+										 dest, completionTag);
+		else
+			standard_ProcessUtility(parsetree, queryString,
+									context, params,
+									dest, completionTag);
 	}
+	PG_CATCH();
+	{
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
+
+	if (!pgaudit_enabled)
+		return;
 
 	switch (nodeTag(parsetree))
 	{
@@ -526,23 +525,6 @@ pgaudit_utility_command(Node *parsetree,
 				 errhidestmt(true)
 					)
 			);
-
-	PG_TRY();
-	{
-		if (next_ProcessUtility_hook)
-			(*next_ProcessUtility_hook) (parsetree, queryString,
-										 context, params,
-										 dest, completionTag);
-		else
-			standard_ProcessUtility(parsetree, queryString,
-									context, params,
-									dest, completionTag);
-	}
-	PG_CATCH();
-	{
-		PG_RE_THROW();
-	}
-	PG_END_TRY();
 }
 
 
