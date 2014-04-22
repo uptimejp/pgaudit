@@ -315,12 +315,11 @@ pgaudit_client_auth(Port *port, int status)
 {
 	const char *auth_method = NULL;
 
-	if(pgaudit_enabled == false)
-	{
-		if (next_client_auth_hook)
-			(*next_client_auth_hook) (port, status);
+	if (next_client_auth_hook)
+		(*next_client_auth_hook) (port, status);
+
+	if (pgaudit_enabled == false)
 		return;
-	}
 
 	switch(port->hba->auth_method)
 	{
