@@ -286,9 +286,9 @@ log_client_authentication(Port *port, int status)
 	 */
 
 	ereport(LOG, (errmsg("[AUDIT]:LOGIN,%s,%s,%s,%s,%s,%i",
-		 				 make_timestamp(),
-		 				 port->user_name,
-				 		 port->remote_host,
+						 make_timestamp(),
+						 port->user_name,
+						 port->remote_host,
 						 auth_method,
 						 port->database_name,
 						 status)));
@@ -349,56 +349,117 @@ log_utility_command(Node *parsetree,
 					char *completionTag)
 {
 	bool supported_stmt = true;
-	ObjectType objType;
 
 	/*
-	 * If both the statement type and its object type are supported by
-	 * event triggers, then we don't need to log anything. Otherwise,
-	 * we log the query string.
+	 * If the statement (and, for some statements, the object type) is
+	 * supported by event triggers, then we don't need to log anything.
+	 * Otherwise, we log the query string.
+	 *
+	 * The following logic is copied from standard_ProcessUtility in
+	 * tcop/utility.c, and will need to be changed if event trigger
+	 * support is expanded to other commands (if not, the command
+	 * will be logged twice).
 	 */
 
-	switch (nodeTag(parsetree)) {
+	switch (nodeTag(parsetree))
+	{
+		case T_TransactionStmt:
+		case T_PlannedStmt:
+		case T_ClosePortalStmt:
+		case T_FetchStmt:
+		case T_DoStmt:
+		case T_CreateTableSpaceStmt:
+		case T_DropTableSpaceStmt:
+		case T_AlterTableSpaceOptionsStmt:
+		case T_AlterTableSpaceMoveStmt:
+		case T_TruncateStmt:
+		case T_CommentStmt:
+		case T_SecLabelStmt:
+		case T_CopyStmt:
+		case T_PrepareStmt:
+		case T_ExecuteStmt:
+		case T_DeallocateStmt:
+		case T_GrantStmt:
+		case T_GrantRoleStmt:
+		case T_CreatedbStmt:
+		case T_AlterDatabaseStmt:
+		case T_AlterDatabaseSetStmt:
+		case T_DropdbStmt:
+		case T_NotifyStmt:
+		case T_ListenStmt:
+		case T_UnlistenStmt:
+		case T_LoadStmt:
+		case T_ClusterStmt:
+		case T_VacuumStmt:
+		case T_ExplainStmt:
+		case T_AlterSystemStmt:
+		case T_VariableSetStmt:
+		case T_VariableShowStmt:
+		case T_DiscardStmt:
+		case T_CreateEventTrigStmt:
+		case T_AlterEventTrigStmt:
+		case T_CreateRoleStmt:
+		case T_AlterRoleStmt:
+		case T_AlterRoleSetStmt:
+		case T_DropRoleStmt:
+		case T_ReassignOwnedStmt:
+		case T_LockStmt:
+		case T_ConstraintsSetStmt:
+		case T_CheckPointStmt:
+		case T_ReindexStmt:
+			/* These statements are not supported by event triggers. */
+			supported_stmt = false;
+			break;
+
 		case T_DropStmt:
 			{
-				DropStmt *stmt = (DropStmt *) parsetree;
-				objType = stmt->removeType;
+				DropStmt   *stmt = (DropStmt *) parsetree;
+
+				if (!EventTriggerSupportsObjectType(stmt->removeType))
+					supported_stmt = false;
 			}
 			break;
 
 		case T_RenameStmt:
 			{
 				RenameStmt *stmt = (RenameStmt *) parsetree;
-				objType = stmt->renameType;
+
+				if (!EventTriggerSupportsObjectType(stmt->renameType))
+					supported_stmt = false;
 			}
 			break;
 
 		case T_AlterObjectSchemaStmt:
 			{
 				AlterObjectSchemaStmt *stmt = (AlterObjectSchemaStmt *) parsetree;
-				objType = stmt->objectType;
+
+				if (!EventTriggerSupportsObjectType(stmt->objectType))
+					supported_stmt = false;
 			}
 			break;
 
 		case T_AlterOwnerStmt:
 			{
 				AlterOwnerStmt *stmt = (AlterOwnerStmt *) parsetree;
-				objType = stmt->objectType;
+
+				if (!EventTriggerSupportsObjectType(stmt->objectType))
+					supported_stmt = false;
 			}
 			break;
 
 		default:
-			supported_stmt = false;
+			/* All other statement types have event trigger support */
 			break;
 	}
 
-	if (supported_stmt && EventTriggerSupportsObjectType(objType))
+	if (supported_stmt)
 		return;
 
 	ereport(LOG, (errmsg("[AUDIT]:STMT_OTHER,%s,%s,%s,other,,%s,",
-	 					 make_timestamp(),
-		 				 GetUserNameFromId(GetSessionUserId()),
-			 			 GetUserNameFromId(GetUserId()),
-				 		 queryString),
+						 make_timestamp(),
+						 GetUserNameFromId(GetSessionUserId()),
+						 GetUserNameFromId(GetUserId()),
+						 queryString),
 				  errhidestmt(true)));
 }
 
