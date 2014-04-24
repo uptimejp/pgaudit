@@ -217,13 +217,9 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 
 static char *make_timestamp(void)
 {
-
 	pg_time_t timestamp = (pg_time_t) time(NULL);
 
-	/* XXX what time / output format do we want?
-	   I.e. do we want to report the report time, or the
-	   statement timestamp, etc.?
-	 */
+	/* XXX Which time should we report, and in what format? */
 	pg_strftime(tsbuf, TSBUF_LEN, "%Y-%m-%d %H:%M:%S %Z",
 				pg_localtime(&timestamp, log_timezone));
 
