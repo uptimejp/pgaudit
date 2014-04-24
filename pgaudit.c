@@ -53,11 +53,6 @@
 
 PG_MODULE_MAGIC;
 
-static ClientAuthentication_hook_type next_ClientAuthentication_hook = NULL;
-static ExecutorCheckPerms_hook_type next_ExecutorCheckPerms_hook = NULL;
-static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
-static object_access_hook_type next_object_access_hook = NULL;
-
 static bool pgaudit_enabled;
 
 char tsbuf[TSBUF_LEN];
@@ -449,6 +444,11 @@ log_utility_command(Node *parsetree,
  * These functions (which are installed by _PG_init, below) just call
  * pgaudit logging functions before continuing the chain of hooks.
  */
+
+static ClientAuthentication_hook_type next_ClientAuthentication_hook = NULL;
+static ExecutorCheckPerms_hook_type next_ExecutorCheckPerms_hook = NULL;
+static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
+static object_access_hook_type next_object_access_hook = NULL;
 
 static void
 pgaudit_ClientAuthentication_hook(Port *port, int status)
