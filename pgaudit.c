@@ -53,8 +53,6 @@
 
 PG_MODULE_MAGIC;
 
-void _PG_init(void);
-
 static ClientAuthentication_hook_type next_ClientAuthentication_hook = NULL;
 static ExecutorCheckPerms_hook_type next_ExecutorCheckPerms_hook = NULL;
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
