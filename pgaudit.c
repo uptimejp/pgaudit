@@ -126,7 +126,7 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 		command_text = TextDatumGetCString(command);
 
 		ereport(LOG,
-				(errmsg("[AUDIT]:DDL_CREATE,%s,%s,%s,%s,%s,%s,%s",
+				(errmsg("[AUDIT]:DDL,%s,%s,%s,%s,%s,%s,%s",
 						make_timestamp(),
 						GetUserNameFromId(GetSessionUserId()),
 						GetUserNameFromId(GetUserId()),
@@ -193,7 +193,7 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 		spi_tuple = SPI_tuptable->vals[row];
 
 		ereport(LOG,
-				(errmsg("[AUDIT]:DDL_DROP,%s,%s,%s,%s,%s,%s,",
+				(errmsg("[AUDIT]:DDL,%s,%s,%s,%s,%s,%s,",
 						make_timestamp(),
 						GetUserNameFromId(GetSessionUserId()),
 						GetUserNameFromId(GetUserId()),

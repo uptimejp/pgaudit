@@ -21,11 +21,11 @@ Requires the deparse branch.
  *   [AUDIT]:LOGIN,timestamp,user_name,remote_host,auth_method,database_name,status
  *
  *   Example:
- *   [AUDIT]:DDL_CREATE,2014-04-17 15:39:21 JST,ibarwick,ibarwick,public.foo,table,CREATE TABLE,CREATE  TABLE  public.foo (id pg_catalog.int4   )   WITH (oids=OFF)
+ *   [AUDIT]:DDL,2014-04-17 15:39:21 JST,ibarwick,ibarwick,public.foo,table,CREATE TABLE,CREATE  TABLE  public.foo (id pg_catalog.int4   )   WITH (oids=OFF)
  *
  *   'event' is one of:
- *      - DDL_CREATE: CREATE or ALTER DDL event
- *      - DDL_DROP:   DROP event
+ *      - DDL:        DDL event
+ *      - DML:        DML event
  *      - STMT_OTHER: command not handled by an event trigger
  *      - LOGIN:      user authentication
  *
