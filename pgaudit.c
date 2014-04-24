@@ -66,23 +66,30 @@ static char *make_timestamp(void);
 PG_FUNCTION_INFO_V1(pgaudit_func_ddl_command_end);
 PG_FUNCTION_INFO_V1(pgaudit_func_sql_drop);
 
+/*
+ * A ddl_command_end event trigger to log commands that we can deparse.
+ */
+
 Datum
 pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 {
 	EventTriggerData *trigdata;
-	int               ret, row, proc;
+	int               ret, row;
 	SPITupleTable	 *spi_tuptable;
 	TupleDesc		  spi_tupdesc;
 
 	MemoryContext tmpcontext;
 	MemoryContext oldcontext;
 
-	const char *query_get_creation_commands = \
-		"SELECT classid, objid, objsubid, object_type, schema, identity, command" \
+	const char *query_get_creation_commands =
+		"SELECT classid, objid, objsubid, object_type, schema, identity, command"
 		"  FROM pg_event_trigger_get_creation_commands()";
 
-	if(pgaudit_enabled == false)
+	if (!pgaudit_enabled)
 		PG_RETURN_NULL();
+
+	if (!CALLED_AS_EVENT_TRIGGER(fcinfo))
+		elog(ERROR, "not fired by event trigger manager");
 
 	tmpcontext = AllocSetContextCreate(CurrentMemoryContext,
 									   "pgaudit_func_ddl_command_end temporary context",
@@ -91,34 +98,20 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 									   ALLOCSET_DEFAULT_MAXSIZE);
 	oldcontext = MemoryContextSwitchTo(tmpcontext);
 
-	if (!CALLED_AS_EVENT_TRIGGER(fcinfo))  /* internal error */
-		elog(ERROR, "not fired by event trigger manager");
-
-	trigdata = (EventTriggerData *) fcinfo->context;
-
-	/* Connect to SPI manager */
-	if ((ret = SPI_connect()) < 0)
-		/* internal error */
+	ret = SPI_connect();
+	if (ret < 0)
 		elog(ERROR, "pgaudit_func_ddl_command_end: SPI_connect returned %d", ret);
 
-
-	/* XXX check return value */
 	ret = SPI_execute(query_get_creation_commands, true, 0);
-	proc = SPI_processed;
-
-	/* XXX Not sure if this should ever happen */
-	if(proc == 0)
-	{
-		SPI_finish();
-		MemoryContextSwitchTo(oldcontext);
-		MemoryContextDelete(tmpcontext);
-		PG_RETURN_NULL();
-	}
+	if (ret != SPI_OK_SELECT)
+		elog(ERROR, "pgaudit_func_ddl_command_end: SPI_execute returned %d", ret);
 
 	spi_tuptable = SPI_tuptable;
 	spi_tupdesc = spi_tuptable->tupdesc;
 
-	for (row = 0; row < proc; row++)
+	trigdata = (EventTriggerData *) fcinfo->context;
+
+	for (row = 0; row < SPI_processed; row++)
 	{
 		HeapTuple  spi_tuple;
 		char	  *command_text;
@@ -129,36 +122,25 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 
 		spi_tuple = spi_tuptable->vals[row];
 
-
 		/* Temporarily dump the raw JSON rendering for debugging */
 		command_formatted = SPI_getvalue(spi_tuple, spi_tupdesc, 7);
-
-		ereport(DEBUG1,
-				(errmsg("%s", command_formatted),
-				 errhidestmt(true)
-					)
-			);
+		ereport(DEBUG1, (errmsg("%s", command_formatted),
+						 errhidestmt(true)));
 
 		json = SPI_getbinval(spi_tuple, spi_tupdesc, 7, &isnull);
-		command = DirectFunctionCall1(pg_event_trigger_expand_command,
-									  json);
-
+		command = DirectFunctionCall1(pg_event_trigger_expand_command, json);
 		command_text = TextDatumGetCString(command);
 
 		ereport(LOG,
-				(errmsg(
-					"[AUDIT]:DDL_CREATE,%s,%s,%s,%s,%s,%s,%s",
-					make_timestamp(),
-					GetUserNameFromId(GetSessionUserId()),
-					GetUserNameFromId(GetUserId()),
-					SPI_getvalue(spi_tuple, spi_tupdesc, 6), /* object identity */
-					SPI_getvalue(spi_tuple, spi_tupdesc, 4), /* object type */
-					trigdata->tag,
-					command_text
-					),
-				 errhidestmt(true)
-					)
-			);
+				(errmsg("[AUDIT]:DDL_CREATE,%s,%s,%s,%s,%s,%s,%s",
+						make_timestamp(),
+						GetUserNameFromId(GetSessionUserId()),
+						GetUserNameFromId(GetUserId()),
+						SPI_getvalue(spi_tuple, spi_tupdesc, 6), /* object identity */
+						SPI_getvalue(spi_tuple, spi_tupdesc, 4), /* object type */
+						trigdata->tag,
+						command_text),
+				 errhidestmt(true)));
 	}
 
 	SPI_finish();
