@@ -53,6 +53,8 @@
 
 PG_MODULE_MAGIC;
 
+void _PG_init(void);
+
 static bool pgaudit_enabled;
 
 char tsbuf[TSBUF_LEN];
