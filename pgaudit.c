@@ -55,9 +55,11 @@ PG_MODULE_MAGIC;
 
 void _PG_init(void);
 
-/*
- * GUC: pgaudit.enabled = (on|off)
- */
+static ClientAuthentication_hook_type next_ClientAuthentication_hook = NULL;
+static ExecutorCheckPerms_hook_type next_ExecutorCheckPerms_hook = NULL;
+static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
+static object_access_hook_type next_object_access_hook = NULL;
+
 static bool pgaudit_enabled;
 
 char tsbuf[TSBUF_LEN];
@@ -269,57 +271,26 @@ static char *make_timestamp(void)
 	return tsbuf;
 }
 
-
-static ExecutorCheckPerms_hook_type next_exec_check_perms_hook = NULL;
-static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
-static ClientAuthentication_hook_type next_client_auth_hook = NULL;
-static object_access_hook_type next_object_access_hook = NULL;
-
-
-
-static void
-pgaudit_object_access(ObjectAccessType access,
-					  Oid classId,
-					  Oid objectId,
-					  int subId,
-					  void *arg)
-{
-	if (next_object_access_hook)
-		(*next_object_access_hook) (access, classId, objectId, subId, arg);
-}
-
-static bool
-pgaudit_exec_check_perms(List *rangeTabls, bool abort)
-{
-	if (next_exec_check_perms_hook &&
-		!(*next_exec_check_perms_hook) (rangeTabls, abort))
-		return false;
-
-	return true;
-}
-
+/*
+ * Logging functions
+ * -----------------
+ */
 
 /* Log authentication events
  *
- * Notes:
- *  - for some authentication types, ClientAuthentication() [libfq/auth.c]
- *    issues an 'ereport(FATAL)' before the hook is called, meaning
- *    certain authentication errors in some circumstances can't be handled here
- *  - status = -2 [STATUS_EOF]: authentication initiated but no credentials supplied
- *  - status = -1 [STATUS_ERROR]: credentials supplied, authentication failed
- *  - status =  0 [STATUS_OK]: credentials supplied, authentication succeeded
+ * -2/STATUS_EOF: authentication initiated but no credentials supplied
+ * -1/STATUS_ERROR: credentials supplied, authentication failed
+ *  0/STATUS_OK: credentials supplied, authentication succeeded
+ *
+ * Note that ClientAuthentication() [libfq/auth.c] sometimes calls
+ * 'ereport(FATAL)' before calling the hook, so we can't log all
+ * authentication errors here.
  */
 
 static void
-pgaudit_client_auth(Port *port, int status)
+log_client_authentication(Port *port, int status)
 {
 	const char *auth_method = NULL;
-
-	if (next_client_auth_hook)
-		(*next_client_auth_hook) (port, status);
-
-	if (!pgaudit_enabled)
-		return;
 
 	switch(port->hba->auth_method)
 	{
@@ -367,166 +338,180 @@ pgaudit_client_auth(Port *port, int status)
 
 	/* TODO: can we get the role's OID? It might be useful to
 	 * log that (e.g. to help identify roles even if the name
-	 * was changed), however at this point in the authentication process
-	 * GetUserId() returns 0
+	 * was changed), however at this point in the authentication
+	 * process GetUserId() returns 0
 	 */
 
-	ereport(LOG,
-			(errmsg(
-				"[AUDIT]:LOGIN,%s,%s,%s,%s,%s,%i",
-				make_timestamp(),
-				port->user_name,
-				port->remote_host,
-				auth_method,
-				port->database_name,
-				status
-				)
-				)
-		);
+	ereport(LOG, (errmsg("[AUDIT]:LOGIN,%s,%s,%s,%s,%s,%i",
+		 				 make_timestamp(),
+		 				 port->user_name,
+				 		 port->remote_host,
+						 auth_method,
+						 port->database_name,
+						 status)));
 }
 
-
-/* Log utility commands which cannot handled by event triggers,
- * particularly those which affect global objects
+/*
+ * Log object accesses.
  */
 
 static void
-pgaudit_utility_command(Node *parsetree,
-						const char *queryString,
-						ProcessUtilityContext context,
-						ParamListInfo params,
-						DestReceiver *dest,
-						char *completionTag)
+log_object_access(ObjectAccessType access,
+				  Oid classId,
+				  Oid objectId,
+				  int subId,
+				  void *arg)
 {
-	bool audit_command = false;
+	/*
+	 * The event triggers defined above cover most of the cases we
+	 * would see here, so we do nothing for now.
+	 */
+}
 
-	PG_TRY();
-	{
-		if (next_ProcessUtility_hook)
-			(*next_ProcessUtility_hook) (parsetree, queryString,
-										 context, params,
-										 dest, completionTag);
-		else
-			standard_ProcessUtility(parsetree, queryString,
-									context, params,
-									dest, completionTag);
-	}
-	PG_CATCH();
-	{
-		PG_RE_THROW();
-	}
-	PG_END_TRY();
+/*
+ * Log executor permissions checks.
+ */
 
-	if (!pgaudit_enabled)
-		return;
+static void
+log_executor_check_perms(List *rangeTabls, bool abort)
+{
+}
 
-	switch (nodeTag(parsetree))
-	{
-		/*
-		 * The following statements are not handled by event triggers:
-		 */
-		case T_GrantStmt:
-		case T_GrantRoleStmt:
-		case T_TransactionStmt:
-		case T_PlannedStmt:
-		case T_ClosePortalStmt:
-		case T_FetchStmt:
-		case T_DoStmt:
-		case T_CreateTableSpaceStmt:
-		case T_DropTableSpaceStmt:
-		case T_AlterTableSpaceOptionsStmt:
-		case T_AlterTableSpaceMoveStmt:
-		case T_TruncateStmt:
-		case T_CommentStmt:
-		case T_SecLabelStmt:
-		case T_CopyStmt:
-		case T_PrepareStmt:
-		case T_ExecuteStmt:
-		case T_DeallocateStmt:
-		case T_CreatedbStmt:
-		case T_AlterDatabaseStmt:
-		case T_AlterDatabaseSetStmt:
-		case T_DropdbStmt:
-		case T_NotifyStmt:
-		case T_ListenStmt:
-		case T_UnlistenStmt:
-		case T_LoadStmt:
-		case T_ClusterStmt:
-		case T_VacuumStmt:
-		case T_ExplainStmt:
-		case T_AlterSystemStmt:
-		case T_VariableSetStmt:
-		case T_VariableShowStmt:
-		case T_DiscardStmt:
-		case T_CreateEventTrigStmt:
-		case T_AlterEventTrigStmt:
-		case T_CreateRoleStmt:
-		case T_AlterRoleStmt:
-		case T_AlterRoleSetStmt:
-		case T_DropRoleStmt:
-		case T_ReassignOwnedStmt:
-		case T_LockStmt:
-		case T_ConstraintsSetStmt:
-		case T_CheckPointStmt:
-		case T_ReindexStmt:
-			audit_command = true;
-			break;
+/*
+ * Log utility commands which cannot be handled by event triggers,
+ * particularly those which affect global objects.
+ */
 
-			/*
-			 * The following statements are supported by event triggers only
-			 * in some cases:
-			 */
+static void
+log_utility_command(Node *parsetree,
+					const char *queryString,
+					ProcessUtilityContext context,
+					ParamListInfo params,
+					DestReceiver *dest,
+					char *completionTag)
+{
+	bool supported_stmt = true;
+	ObjectType objType;
 
+	/*
+	 * If both the statement type and its object type are supported by
+	 * event triggers, then we don't need to log anything. Otherwise,
+	 * we log the query string.
+	 */
+
+	switch (nodeTag(parsetree)) {
 		case T_DropStmt:
 			{
-				DropStmt   *stmt = (DropStmt *) parsetree;
-
-				if (!EventTriggerSupportsObjectType(stmt->removeType))
-					audit_command = true;
+				DropStmt *stmt = (DropStmt *) parsetree;
+				objType = stmt->removeType;
 			}
 			break;
+
 		case T_RenameStmt:
 			{
 				RenameStmt *stmt = (RenameStmt *) parsetree;
-
-				if (!EventTriggerSupportsObjectType(stmt->renameType))
-					audit_command = true;
+				objType = stmt->renameType;
 			}
+			break;
+
 		case T_AlterObjectSchemaStmt:
 			{
 				AlterObjectSchemaStmt *stmt = (AlterObjectSchemaStmt *) parsetree;
-
-				if (!EventTriggerSupportsObjectType(stmt->objectType))
-					audit_command = true;
+				objType = stmt->objectType;
 			}
+			break;
+
 		case T_AlterOwnerStmt:
 			{
 				AlterOwnerStmt *stmt = (AlterOwnerStmt *) parsetree;
-
-				if (!EventTriggerSupportsObjectType(stmt->objectType))
-					audit_command = true;
+				objType = stmt->objectType;
 			}
 			break;
+
 		default:
-			elog(DEBUG1, "pgaudit_utility_command(): not handling node type: %d",
-					 (int) nodeTag(parsetree));
+			supported_stmt = false;
 			break;
 	}
 
-	if(audit_command == true)
-		ereport(LOG,
-				(errmsg(
-					"[AUDIT]:STMT_OTHER,%s,%s,%s,other,,%s,",
-					make_timestamp(),
-					GetUserNameFromId(GetSessionUserId()),
-					GetUserNameFromId(GetUserId()),
-					queryString
-					),
-				 errhidestmt(true)
-					)
-			);
+	if (supported_stmt && EventTriggerSupportsObjectType(objType))
+		return;
+
+	ereport(LOG, (errmsg("[AUDIT]:STMT_OTHER,%s,%s,%s,other,,%s,",
+	 					 make_timestamp(),
+		 				 GetUserNameFromId(GetSessionUserId()),
+			 			 GetUserNameFromId(GetUserId()),
+				 		 queryString),
+				  errhidestmt(true)));
 }
 
+/*
+ * Hook functions
+ * --------------
+ *
+ * These functions (which are installed by _PG_init, below) just call
+ * pgaudit logging functions before continuing the chain of hooks.
+ */
+
+static void
+pgaudit_ClientAuthentication_hook(Port *port, int status)
+{
+	if (pgaudit_enabled)
+		log_client_authentication(port, status);
+
+	if (next_ClientAuthentication_hook)
+		(*next_ClientAuthentication_hook) (port, status);
+}
+
+static void
+pgaudit_object_access_hook(ObjectAccessType access,
+						   Oid classId,
+						   Oid objectId,
+						   int subId,
+						   void *arg)
+{
+	if (pgaudit_enabled)
+		log_object_access(access, classId, objectId, subId, arg);
+
+	if (next_object_access_hook)
+		(*next_object_access_hook) (access, classId, objectId, subId, arg);
+}
+
+static bool
+pgaudit_ExecutorCheckPerms_hook(List *rangeTabls, bool abort)
+{
+	if (pgaudit_enabled)
+		log_executor_check_perms(rangeTabls, abort);
+
+	if (next_ExecutorCheckPerms_hook &&
+		!(*next_ExecutorCheckPerms_hook) (rangeTabls, abort))
+		return false;
+
+	return true;
+}
+
+static void
+pgaudit_ProcessUtility_hook(Node *parsetree,
+							const char *queryString,
+							ProcessUtilityContext context,
+							ParamListInfo params,
+							DestReceiver *dest,
+							char *completionTag)
+{
+	if (pgaudit_enabled)
+		log_utility_command(parsetree, queryString, context,
+							params, dest, completionTag);
+
+	if (next_ProcessUtility_hook)
+		(*next_ProcessUtility_hook) (parsetree, queryString, context,
+									 params, dest, completionTag);
+	else
+		standard_ProcessUtility(parsetree, queryString, context,
+								params, dest, completionTag);
+}
+
+/*
+ * Define GUC variables and install hooks upon module load.
+ */
 
 void
 _PG_init(void)
@@ -552,15 +537,15 @@ _PG_init(void)
 							 NULL,
 							 NULL);
 
-	next_client_auth_hook = ClientAuthentication_hook;
-	ClientAuthentication_hook = pgaudit_client_auth;
+	next_ClientAuthentication_hook = ClientAuthentication_hook;
+	ClientAuthentication_hook = pgaudit_ClientAuthentication_hook;
 
 	next_object_access_hook = object_access_hook;
-	object_access_hook = pgaudit_object_access;
+	object_access_hook = pgaudit_object_access_hook;
 
-	next_exec_check_perms_hook = ExecutorCheckPerms_hook;
-	ExecutorCheckPerms_hook = pgaudit_exec_check_perms;
+	next_ExecutorCheckPerms_hook = ExecutorCheckPerms_hook;
+	ExecutorCheckPerms_hook = pgaudit_ExecutorCheckPerms_hook;
 
 	next_ProcessUtility_hook = ProcessUtility_hook;
-	ProcessUtility_hook = pgaudit_utility_command;
+	ProcessUtility_hook = pgaudit_ProcessUtility_hook;
 }
