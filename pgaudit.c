@@ -48,6 +48,7 @@
 #include "utils/memutils.h"
 #include "utils/guc.h"
 #include "tcop/utility.h"
+#include "utils/acl.h"
 
 #define TSBUF_LEN 128
 
@@ -213,19 +214,6 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 	PG_RETURN_NULL();
 }
 
-/* Quick'n'dirty timestamp generation */
-
-static char *make_timestamp(void)
-{
-	pg_time_t timestamp = (pg_time_t) time(NULL);
-
-	/* XXX Which time should we report, and in what format? */
-	pg_strftime(tsbuf, TSBUF_LEN, "%Y-%m-%d %H:%M:%S %Z",
-				pg_localtime(&timestamp, log_timezone));
-
-	return tsbuf;
-}
-
 /*
  * Logging functions
  * -----------------
@@ -307,29 +295,44 @@ log_client_authentication(Port *port, int status)
 }
 
 /*
- * Log object accesses.
+ * Log DML operations via executor permissions checks.
  */
 
 static void
-log_object_access(ObjectAccessType access,
-				  Oid classId,
-				  Oid objectId,
-				  int subId,
-				  void *arg)
+log_executor_check_perms(List *rangeTabls, bool abort_on_violation)
 {
-	/*
-	 * The event triggers defined above cover most of the cases we
-	 * would see here, so we do nothing for now.
-	 */
-}
+	ListCell *lr;
 
-/*
- * Log executor permissions checks.
- */
+	foreach (lr, rangeTabls)
+	{
+		RangeTblEntry *rte = lfirst(lr);
+		char perms[5];
+		int ip = 0;
 
-static void
-log_executor_check_perms(List *rangeTabls, bool abort)
-{
+		if (rte->relkind != RTE_RELATION)
+			continue;
+
+		if (rte->requiredPerms & ACL_SELECT)
+			perms[ip++] = ACL_SELECT_CHR;
+		if (rte->requiredPerms & ACL_INSERT)
+			perms[ip++] = ACL_INSERT_CHR;
+		if (rte->requiredPerms & ACL_UPDATE)
+			perms[ip++] = ACL_UPDATE_CHR;
+		if (rte->requiredPerms & ACL_DELETE)
+			perms[ip++] = ACL_DELETE_CHR;
+		perms[ip++] = '\0';
+
+		/*
+		 * XXX We could decode and log rte->selectedCols and
+		 * rte->modifiedCols here too.
+		 */
+
+		ereport(LOG, (errmsg("[AUDIT]:DML,%s,%s,%s,%s,%s",
+							 make_timestamp(),
+							 GetUserNameFromId(GetSessionUserId()),
+							 GetUserNameFromId(GetUserId()),
+							 rte->eref->aliasname, perms)));
+	}
 }
 
 /*
@@ -400,6 +403,24 @@ log_utility_command(Node *parsetree,
 }
 
 /*
+ * Log object accesses (which is more about DDL than DML, even though it
+ * sounds like the latter).
+ */
+
+static void
+log_object_access(ObjectAccessType access,
+				  Oid classId,
+				  Oid objectId,
+				  int subId,
+				  void *arg)
+{
+	/*
+	 * The event triggers defined above cover most of the cases we
+	 * would see here, so we do nothing for now.
+	 */
+}
+
+/*
  * Hook functions
  * --------------
  *
@@ -420,20 +441,6 @@ pgaudit_ClientAuthentication_hook(Port *port, int status)
 
 	if (next_ClientAuthentication_hook)
 		(*next_ClientAuthentication_hook) (port, status);
-}
-
-static void
-pgaudit_object_access_hook(ObjectAccessType access,
-						   Oid classId,
-						   Oid objectId,
-						   int subId,
-						   void *arg)
-{
-	if (pgaudit_enabled)
-		log_object_access(access, classId, objectId, subId, arg);
-
-	if (next_object_access_hook)
-		(*next_object_access_hook) (access, classId, objectId, subId, arg);
 }
 
 static bool
@@ -467,6 +474,20 @@ pgaudit_ProcessUtility_hook(Node *parsetree,
 	else
 		standard_ProcessUtility(parsetree, queryString, context,
 								params, dest, completionTag);
+}
+
+static void
+pgaudit_object_access_hook(ObjectAccessType access,
+						   Oid classId,
+						   Oid objectId,
+						   int subId,
+						   void *arg)
+{
+	if (pgaudit_enabled)
+		log_object_access(access, classId, objectId, subId, arg);
+
+	if (next_object_access_hook)
+		(*next_object_access_hook) (access, classId, objectId, subId, arg);
 }
 
 /*
@@ -508,4 +529,22 @@ _PG_init(void)
 
 	next_ProcessUtility_hook = ProcessUtility_hook;
 	ProcessUtility_hook = pgaudit_ProcessUtility_hook;
+}
+
+/*
+ * Utility functions
+ * -----------------
+ */
+
+/* Quick'n'dirty timestamp generation */
+
+static char *make_timestamp(void)
+{
+	pg_time_t timestamp = (pg_time_t) time(NULL);
+
+	/* XXX Which time should we report, and in what format? */
+	pg_strftime(tsbuf, TSBUF_LEN, "%Y-%m-%d %H:%M:%S %Z",
+				pg_localtime(&timestamp, log_timezone));
+
+	return tsbuf;
 }
