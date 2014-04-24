@@ -75,7 +75,6 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 {
 	EventTriggerData *trigdata;
 	int               ret, row;
-	SPITupleTable	 *spi_tuptable;
 	TupleDesc		  spi_tupdesc;
 
 	MemoryContext tmpcontext;
@@ -106,8 +105,7 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 	if (ret != SPI_OK_SELECT)
 		elog(ERROR, "pgaudit_func_ddl_command_end: SPI_execute returned %d", ret);
 
-	spi_tuptable = SPI_tuptable;
-	spi_tupdesc = spi_tuptable->tupdesc;
+	spi_tupdesc = SPI_tuptable->tupdesc;
 
 	trigdata = (EventTriggerData *) fcinfo->context;
 
@@ -120,7 +118,7 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 		Datum	   command;
 		bool	   isnull;
 
-		spi_tuple = spi_tuptable->vals[row];
+		spi_tuple = SPI_tuptable->vals[row];
 
 		/* Temporarily dump the raw JSON rendering for debugging */
 		command_formatted = SPI_getvalue(spi_tuple, spi_tupdesc, 7);
@@ -149,24 +147,29 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 	PG_RETURN_NULL();
 }
 
+/*
+ * An sql_drop event trigger to log commands that we can deparse.
+ */
 
 Datum
 pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 {
 	EventTriggerData *trigdata;
-	SPITupleTable	 *spi_tuptable;
 	TupleDesc		  spi_tupdesc;
-	int               ret, row, proc;
+	int               ret, row;
 
 	MemoryContext tmpcontext;
 	MemoryContext oldcontext;
 
 	const char *query_dropped_objects =
-		"SELECT classid, objid, objsubid, object_type, schema_name, object_name, object_identity" \
+		"SELECT classid, objid, objsubid, object_type, schema_name, object_name, object_identity"
 		"  FROM pg_event_trigger_dropped_objects()";
 
-	if(pgaudit_enabled == false)
+	if (!pgaudit_enabled)
 		PG_RETURN_NULL();
+
+	if (!CALLED_AS_EVENT_TRIGGER(fcinfo))
+		elog(ERROR, "not fired by event trigger manager");
 
 	tmpcontext = AllocSetContextCreate(CurrentMemoryContext,
 									   "pgaudit_func_sql_drop temporary context",
@@ -175,53 +178,33 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 									   ALLOCSET_DEFAULT_MAXSIZE);
 	oldcontext = MemoryContextSwitchTo(tmpcontext);
 
-	if (!CALLED_AS_EVENT_TRIGGER(fcinfo))  /* internal error */
-		elog(ERROR, "not fired by event trigger manager");
+	ret = SPI_connect();
+	if (ret < 0)
+		elog(ERROR, "pgaudit_func_sql_drop: SPI_connect returned %d", ret);
+
+	ret = SPI_execute(query_dropped_objects, true, 0);
+	if (ret != SPI_OK_SELECT)
+		elog(ERROR, "pgaudit_func_sql_drop: SPI_execute returned %d", ret);
+
+	spi_tupdesc = SPI_tuptable->tupdesc;
 
 	trigdata = (EventTriggerData *) fcinfo->context;
 
-	/* Connect to SPI manager */
-	if ((ret = SPI_connect()) < 0)
-		/* internal error */
-		elog(ERROR, "pgaudit_func_sql_drop: SPI_connect returned %d", ret);
-
-	/* XXX check return value */
-	ret = SPI_execute(query_dropped_objects, true, 0);
-	proc = SPI_processed;
-
-	/* XXX Not sure if this should ever happen */
-	if(proc == 0)
-	{
-		elog(DEBUG1, "pgaudit_func_sql_drop(): SPI error");
-		MemoryContextSwitchTo(oldcontext);
-		MemoryContextDelete(tmpcontext);
-		SPI_finish();
-		PG_RETURN_NULL();
-	}
-
-	spi_tuptable = SPI_tuptable;
-	spi_tupdesc = spi_tuptable->tupdesc;
-
-	for (row = 0; row < proc; row++)
+	for (row = 0; row < SPI_processed; row++)
 	{
 		HeapTuple  spi_tuple;
 
-		spi_tuple = spi_tuptable->vals[row];
+		spi_tuple = SPI_tuptable->vals[row];
 
 		ereport(LOG,
-				(errmsg(
-					"[AUDIT]:DDL_DROP,%s,%s,%s,%s,%s,%s,",
-					make_timestamp(),
-					GetUserNameFromId(GetSessionUserId()),
-					GetUserNameFromId(GetUserId()),
-					SPI_getvalue(spi_tuple, spi_tupdesc, 7), /* object identity */
-					SPI_getvalue(spi_tuple, spi_tupdesc, 4), /* object type */
-					trigdata->tag
-					),
-				 errhidestmt(true)
-					)
-			);
-
+				(errmsg("[AUDIT]:DDL_DROP,%s,%s,%s,%s,%s,%s,",
+						make_timestamp(),
+						GetUserNameFromId(GetSessionUserId()),
+						GetUserNameFromId(GetUserId()),
+						SPI_getvalue(spi_tuple, spi_tupdesc, 7), /* object identity */
+						SPI_getvalue(spi_tuple, spi_tupdesc, 4), /* object type */
+						trigdata->tag),
+				 errhidestmt(true)));
 	}
 
 	SPI_finish();
@@ -229,7 +212,6 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 	MemoryContextDelete(tmpcontext);
 	PG_RETURN_NULL();
 }
-
 
 /* Quick'n'dirty timestamp generation */
 
