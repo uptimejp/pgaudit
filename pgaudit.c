@@ -309,7 +309,7 @@ log_executor_check_perms(List *rangeTabls, bool abort_on_violation)
 		char perms[5];
 		int ip = 0;
 
-		if (rte->relkind != RTE_RELATION)
+		if (rte->rtekind != RTE_RELATION)
 			continue;
 
 		if (rte->requiredPerms & ACL_SELECT)
