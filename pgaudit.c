@@ -49,6 +49,9 @@
 #include "utils/guc.h"
 #include "tcop/utility.h"
 #include "utils/acl.h"
+#include "utils/ruleutils.h"
+#include "utils/lsyscache.h"
+#include "utils/rel.h"
 
 #define TSBUF_LEN 128
 
@@ -305,12 +308,19 @@ log_executor_check_perms(List *rangeTabls, bool abort_on_violation)
 
 	foreach (lr, rangeTabls)
 	{
+		Relation rel;
 		RangeTblEntry *rte = lfirst(lr);
+		char *relname;
 		char perms[5];
 		int ip = 0;
 
 		if (rte->rtekind != RTE_RELATION)
 			continue;
+
+		rel = relation_open(rte->relid, NoLock);
+		relname = quote_qualified_identifier(get_namespace_name(RelationGetNamespace(rel)),
+											 RelationGetRelationName(rel));
+		relation_close(rel, NoLock);
 
 		if (rte->requiredPerms & ACL_SELECT)
 			perms[ip++] = ACL_SELECT_CHR;
@@ -331,7 +341,9 @@ log_executor_check_perms(List *rangeTabls, bool abort_on_violation)
 							 make_timestamp(),
 							 GetUserNameFromId(GetSessionUserId()),
 							 GetUserNameFromId(GetUserId()),
-							 rte->eref->aliasname, perms)));
+							 relname, perms)));
+
+		pfree(relname);
 	}
 }
 
