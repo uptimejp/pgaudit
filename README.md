@@ -19,7 +19,7 @@ the checked-out deparse source tree. Build Postgres as usual, then:
 
 	cd contrib/pgaudit && make install
 
-Enabling the module is slightly cumbersome. First,
+Once the module is installed, run:
 
 	CREATE EXTENSION pgaudit;
 
