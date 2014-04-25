@@ -41,6 +41,7 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/ruleutils.h"
+#include "utils/timestamp.h"
 
 PG_MODULE_MAGIC;
 
@@ -54,12 +55,80 @@ Datum pgaudit_func_sql_drop(PG_FUNCTION_ARGS);
 PG_FUNCTION_INFO_V1(pgaudit_func_ddl_command_end);
 PG_FUNCTION_INFO_V1(pgaudit_func_sql_drop);
 
-static char *make_timestamp(void);
+/*
+ * This module collects AuditEvents from various sources (event
+ * triggers, and executor/utility hooks) and passes them to the
+ * log_audit_event() function.
+ *
+ * An AuditEvent represents an operation that potentially affects a
+ * single object. If an underlying command affects multiple objects,
+ * multiple AuditEvents must be created to represent it.
+ */
+
+typedef enum {
+	EVENT_DDL,
+	EVENT_DML,
+	EVENT_UTIL
+} Event;
+
+typedef struct {
+	Event event;
+	const char *object_id;
+	const char *object_type;
+	const char *command_tag;
+	const char *command_text;
+} AuditEvent;
 
 /*
- * A ddl_command_end event trigger to log commands that we can deparse.
- * This trigger is called at the end of any DDL command that has event
- * trigger support.
+ * Receives an AuditEvent and decides whether to log it (depending on
+ * configuration) and how. The AuditEvent is assumed to be competently
+ * filled in by the caller (unknown values are set to "" so that they
+ * can be logged without error checking).
+ */
+
+void
+log_audit_event(AuditEvent *e)
+{
+	const char *timestamp;
+	const char *username;
+	const char *eusername;
+	const char *eventname;
+
+	timestamp = timestamptz_to_str(GetCurrentTimestamp());
+	username = GetUserNameFromId(GetSessionUserId());
+	eusername = GetUserNameFromId(GetUserId());
+
+	switch (e->event) {
+		case EVENT_DDL:
+			eventname = "DDL";
+			break;
+		case EVENT_DML:
+			eventname = "DML";
+			break;
+		case EVENT_UTIL:
+			eventname = "UTIL";
+			break;
+		default:
+			eventname = "???";
+			break;
+	}
+
+	/*
+	 * For now, we only support logging via ereport(). In future, we may
+	 * log to a separate file, or a table.
+	 */
+
+	ereport(LOG,
+			(errmsg("[AUDIT],%s,%s,%s,%s,%s,%s,%s,%s",
+					timestamp, username, eusername, eventname,
+					e->command_tag, e->object_type, e->object_id,
+					e->command_text)));
+}
+
+/*
+ * A ddl_command_end event trigger to build AuditEvents for commands
+ * that we can deparse. This function is called at the end of any DDL
+ * command that has event trigger support.
  */
 
 Datum
@@ -82,7 +151,7 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 	/*
 	 * This query returns the objects affected by the DDL, and a JSON
 	 * representation of the parsed command. We use SPI to execute it,
-	 * and compose one log entry per object in the results.
+	 * and compose one AuditEvent per object in the results.
 	 */
 
 	query_get_creation_commands =
@@ -110,12 +179,12 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 
 	for (row = 0; row < SPI_processed; row++)
 	{
+		AuditEvent e;
 		HeapTuple  spi_tuple;
-		char	  *command_text;
-		char	  *command_formatted;
 		Datum	   json;
 		Datum	   command;
 		bool	   isnull;
+		char	  *command_formatted;
 
 		spi_tuple = SPI_tuptable->vals[row];
 
@@ -132,18 +201,14 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 
 		json = SPI_getbinval(spi_tuple, spi_tupdesc, 7, &isnull);
 		command = DirectFunctionCall1(pg_event_trigger_expand_command, json);
-		command_text = TextDatumGetCString(command);
 
-		ereport(LOG,
-				(errmsg("[AUDIT]:DDL,%s,%s,%s,%s,%s,%s,%s",
-						make_timestamp(),
-						GetUserNameFromId(GetSessionUserId()),
-						GetUserNameFromId(GetUserId()),
-						SPI_getvalue(spi_tuple, spi_tupdesc, 6), /* object identity */
-						SPI_getvalue(spi_tuple, spi_tupdesc, 4), /* object type */
-						trigdata->tag,
-						command_text),
-				 errhidestmt(true)));
+		e.event = EVENT_DDL;
+		e.object_id = SPI_getvalue(spi_tuple, spi_tupdesc, 6);
+		e.object_type = SPI_getvalue(spi_tuple, spi_tupdesc, 4);
+		e.command_tag = trigdata->tag;
+		e.command_text = TextDatumGetCString(command);
+
+		log_audit_event(&e);
 	}
 
 	SPI_finish();
@@ -153,9 +218,9 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 }
 
 /*
- * An sql_drop event trigger to log dropped objects. At the moment, we
- * do not have the ability to deparse these commands, but once support
- * for the is added upstream, it's easy to implement.
+ * An sql_drop event trigger to build AuditEvents for dropped objects.
+ * At the moment, we do not have the ability to deparse these commands,
+ * but once support for the is added upstream, it's easy to implement.
  */
 
 Datum
@@ -207,19 +272,18 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 
 	for (row = 0; row < SPI_processed; row++)
 	{
+		AuditEvent e;
 		HeapTuple  spi_tuple;
 
 		spi_tuple = SPI_tuptable->vals[row];
 
-		ereport(LOG,
-				(errmsg("[AUDIT]:DDL,%s,%s,%s,%s,%s,%s,",
-						make_timestamp(),
-						GetUserNameFromId(GetSessionUserId()),
-						GetUserNameFromId(GetUserId()),
-						SPI_getvalue(spi_tuple, spi_tupdesc, 7), /* object identity */
-						SPI_getvalue(spi_tuple, spi_tupdesc, 4), /* object type */
-						trigdata->tag),
-				 errhidestmt(true)));
+		e.event = EVENT_DDL;
+		e.object_id = SPI_getvalue(spi_tuple, spi_tupdesc, 7);
+		e.object_type = SPI_getvalue(spi_tuple, spi_tupdesc, 4);
+		e.command_tag = trigdata->tag;
+		e.command_text = "";
+
+		log_audit_event(&e);
 	}
 
 	SPI_finish();
@@ -229,14 +293,9 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 }
 
 /*
- * Logging functions
- * -----------------
- */
-
-/*
- * Log DML operations via executor permissions checks. We get a list of
- * RangeTableEntries from the query. We log each fully-qualified table
- * name along with the required access permissions.
+ * Create AuditEvents for DML operations via executor permissions
+ * checks. We create an AuditEvent for each table in the list of
+ * RangeTableEntries from the query.
  */
 
 static void
@@ -247,55 +306,97 @@ log_executor_check_perms(List *rangeTabls, bool abort_on_violation)
 	foreach (lr, rangeTabls)
 	{
 		Relation rel;
+		AuditEvent e;
 		RangeTblEntry *rte = lfirst(lr);
 		char *relname;
-		char perms[5];
-		int ip = 0;
+		const char *tag;
+		const char *reltype;
 
 		/* We only care about tables, and can ignore subqueries etc. */
 		if (rte->rtekind != RTE_RELATION)
 			continue;
 
 		/* Get the fully-qualified name of the relation. */
+
 		rel = relation_open(rte->relid, NoLock);
 		relname = quote_qualified_identifier(get_namespace_name(RelationGetNamespace(rel)),
 											 RelationGetRelationName(rel));
 		relation_close(rel, NoLock);
 
-		/*
-		 * Decode the rte->requiredPerms bitmap into an array of
-		 * characters. This is just a convenient representation
-		 * with some precedent; it may not be the most useful.
-		 */
+		/* Decode rte->relkind into an object type. */
 
-		if (rte->requiredPerms & ACL_SELECT)
-			perms[ip++] = ACL_SELECT_CHR;
+		switch (rte->relkind)
+		{
+			case RELKIND_RELATION:
+				reltype = "TABLE";
+				break;
+
+			case RELKIND_INDEX:
+				reltype = "INDEX";
+				break;
+
+			case RELKIND_SEQUENCE:
+				reltype = "SEQUENCE";
+				break;
+
+			case RELKIND_TOASTVALUE:
+				reltype = "TOASTVALUE";
+				break;
+
+			case RELKIND_VIEW:
+				reltype = "VIEW";
+				break;
+
+			case RELKIND_COMPOSITE_TYPE:
+				reltype = "COMPOSITE_TYPE";
+				break;
+
+			case RELKIND_FOREIGN_TABLE:
+				reltype = "FOREIGN_TABLE";
+				break;
+
+			case RELKIND_MATVIEW:
+				reltype = "MATVIEW";
+				break;
+
+			default:
+				reltype = "UNKNOWN";
+				break;
+		}
+
+		/* Decode the rte->requiredPerms bitmap into a command tag. */
+
 		if (rte->requiredPerms & ACL_INSERT)
-			perms[ip++] = ACL_INSERT_CHR;
-		if (rte->requiredPerms & ACL_UPDATE)
-			perms[ip++] = ACL_UPDATE_CHR;
-		if (rte->requiredPerms & ACL_DELETE)
-			perms[ip++] = ACL_DELETE_CHR;
-		perms[ip++] = '\0';
+			tag = "INSERT";
+		else if (rte->requiredPerms & ACL_UPDATE)
+			tag = "UPDATE";
+		else if (rte->requiredPerms & ACL_DELETE)
+			tag = "DELETE";
+		else if (rte->requiredPerms & ACL_SELECT)
+			tag = "SELECT";
+		else
+			tag = "UNKNOWN";
 
 		/*
-		 * XXX We could decode and log rte->selectedCols and
-		 * rte->modifiedCols here too.
+		 * XXX We could also decode rte->selectedCols and
+		 * rte->modifiedCols here.
 		 */
 
-		ereport(LOG, (errmsg("[AUDIT]:DML,%s,%s,%s,%s,%s",
-							 make_timestamp(),
-							 GetUserNameFromId(GetSessionUserId()),
-							 GetUserNameFromId(GetUserId()),
-							 relname, perms)));
+		e.event = EVENT_DML;
+		e.object_id = relname;
+		e.object_type = reltype;
+		e.command_tag = tag;
+		e.command_text = "";
+
+		log_audit_event(&e);
 
 		pfree(relname);
 	}
 }
 
 /*
- * Log utility commands which cannot be handled by event triggers,
- * particularly those which affect global objects.
+ * Create AuditEvents for utility commands that cannot be handled by
+ * event triggers, particularly those which affect global objects.
  */
 
 static void
@@ -306,6 +407,7 @@ log_utility_command(Node *parsetree,
 					DestReceiver *dest,
 					char *completionTag)
 {
+	AuditEvent e;
 	bool supported_stmt = true;
 
 	/*
@@ -425,12 +527,18 @@ log_utility_command(Node *parsetree,
 	if (supported_stmt)
 		return;
 
-	ereport(LOG, (errmsg("[AUDIT]:STMT_OTHER,%s,%s,%s,other,,%s,",
-						 make_timestamp(),
-						 GetUserNameFromId(GetSessionUserId()),
-						 GetUserNameFromId(GetUserId()),
-						 queryString),
-				  errhidestmt(true)));
+	/*
+	 * XXX Perhaps we should synthesise a command_tag here based on the
+	 * nodeTag(). It might be useful for filtering, at least.
+	 */
+
+	e.event = EVENT_UTIL;
+	e.object_id = "";
+	e.object_type = "";
+	e.command_tag = "";
+	e.command_text = queryString;
+
+	log_audit_event(&e);
 }
 
 /*
@@ -550,25 +658,4 @@ _PG_init(void)
 
 	next_ProcessUtility_hook = ProcessUtility_hook;
 	ProcessUtility_hook = pgaudit_ProcessUtility_hook;
-}
-
-/*
- * Utility functions
- * -----------------
- */
-
-/* Quick'n'dirty timestamp generation */
-
-#define TSBUF_LEN 128
-char tsbuf[TSBUF_LEN];
-
-static char *make_timestamp(void)
-{
-	pg_time_t timestamp = (pg_time_t) time(NULL);
-
-	/* XXX Which time should we report, and in what format? */
-	pg_strftime(tsbuf, TSBUF_LEN, "%Y-%m-%d %H:%M:%S %Z",
-				pg_localtime(&timestamp, log_timezone));
-
-	return tsbuf;
 }
