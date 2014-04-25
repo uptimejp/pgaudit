@@ -19,30 +19,46 @@ the checked-out deparse source tree. Build Postgres as usual, then:
 
 	cd contrib/pgaudit && make install
 
-Once the module is installed, run:
+Edit postgresql.conf and set:
+
+	shared_preload_libraries = 'pgaudit'
+
+Then start the server and run:
 
 	CREATE EXTENSION pgaudit;
 
-Then, edit postgresql.conf and set the following:
+Now you can set pgaudit.enabled = on in postgresql.conf and reload.
+Auditing will then be globally enabled.
 
-	shared_preload_libraries = 'pgaudit'
-	pgaudit.enabled = on
+Log format
+----------
 
-Auditing will then be globally enabled once the server is restarted. In
-future, there will be more fine-grained control over what is audited,
-and when. For the moment, there's only a big red switch that can only
-be changed with a server restart.
+We log audit events in CSV format with the following fields:
 
-Here's an example of some log output:
+	[AUDIT],<timestamp>,<username>,<effective username>,
+		<event>,<tag>,<object type>,<object id>,
+		<command text>
 
-[AUDIT]:DDL,2014-04-17 15:39:21 JST,ibarwick,ibarwick,public.foo,table,CREATE TABLE,CREATE  TABLE  public.foo (id pg_catalog.int4   )   WITH (oids=OFF)
+<event> is DDL, DML, or UTIL.
 
-The log format is still fairly arbitrary and subject to change.
+<tag> is the command tag (e.g. SELECT)
 
-[AUDIT]:event,timestamp,user,effective_user,object_identity,object_type,trigger_tag,command_text
+<object type> is the type of object affected, if any (e.g. TABLE)
 
-'event' is 'DDL', 'DML', 'STMT_OTHER' (for utility commands not handled
-by event triggers).
+<object id> is some way to identify the affected object, usually a
+fully-qualified name
+
+<command text> is the full text of the command.
+
+Note that not all fields are always available.
+
+Here are some examples of log output:
+
+LOG:  [AUDIT],2014-04-25 22:27:09.167245+05:30,ams,ams,UTIL,,,,show pgaudit.enabled;
+LOG:  [AUDIT],2014-04-25 22:27:23.658128+05:30,ams,ams,DML,SELECT,TABLE,pg_catalog.pg_class,
+LOG:  [AUDIT],2014-04-25 22:27:23.658189+05:30,ams,ams,DML,SELECT,TABLE,pg_catalog.pg_namespace,
+LOG:  [AUDIT],2014-04-25 22:27:41.149732+05:30,ams,ams,DDL,CREATE TABLE,table,public.a,CREATE  TABLE  public.a (a pg_catalog.int4   , b pg_catalog.text   COLLATE pg_catalog."default")   WITH (oids=OFF) 
+LOG:  [AUDIT],2014-04-25 22:27:41.163687+05:30,ams,ams,DML,INSERT,TABLE,public.a,
 
 Design overview
 ---------------
