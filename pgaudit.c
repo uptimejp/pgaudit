@@ -1,6 +1,5 @@
 /*
  * pgaudit/pgaudit.c
- * 		experimental auditing extension
  *
  * Copyright © 2014, PostgreSQL Global Development Group
  *
