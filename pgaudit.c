@@ -511,7 +511,7 @@ pgaudit_ClientAuthentication_hook(Port *port, int status)
 static bool
 pgaudit_ExecutorCheckPerms_hook(List *rangeTabls, bool abort)
 {
-	if (pgaudit_enabled)
+	if (pgaudit_enabled && !IsAbortedTransactionBlockState())
 		log_executor_check_perms(rangeTabls, abort);
 
 	if (next_ExecutorCheckPerms_hook &&
@@ -529,7 +529,7 @@ pgaudit_ProcessUtility_hook(Node *parsetree,
 							DestReceiver *dest,
 							char *completionTag)
 {
-	if (pgaudit_enabled)
+	if (pgaudit_enabled && !IsAbortedTransactionBlockState())
 		log_utility_command(parsetree, queryString, context,
 							params, dest, completionTag);
 
@@ -548,7 +548,7 @@ pgaudit_object_access_hook(ObjectAccessType access,
 						   int subId,
 						   void *arg)
 {
-	if (pgaudit_enabled)
+	if (pgaudit_enabled && !IsAbortedTransactionBlockState())
 		log_object_access(access, classId, objectId, subId, arg);
 
 	if (next_object_access_hook)
