@@ -41,4 +41,3 @@ What we're doing
 1. We'll use event triggers for those events they support
 2. We'll use a ProcessUtility_hook to log other DDL.
 3. We'll use an ExecutorCheckPerms_hook to log SELECT/DML.
-4. We'll use a ClientAuthentication_hook for login events.

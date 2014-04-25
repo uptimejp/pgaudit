@@ -40,10 +40,9 @@ Here's an example of some log output:
 The log format is still fairly arbitrary and subject to change.
 
 [AUDIT]:event,timestamp,user,effective_user,object_identity,object_type,trigger_tag,command_text
-[AUDIT]:LOGIN,timestamp,user_name,remote_host,auth_method,database_name,status
 
 'event' is 'DDL', 'DML', 'STMT_OTHER' (for utility commands not handled
-by event triggers), or 'LOGIN'.
+by event triggers).
 
 Design overview
 ---------------

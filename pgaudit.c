@@ -233,81 +233,6 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
  * -----------------
  */
 
-/* Log authentication events
- *
- * -2/STATUS_EOF: authentication initiated but no credentials supplied
- * -1/STATUS_ERROR: credentials supplied, authentication failed
- *  0/STATUS_OK: credentials supplied, authentication succeeded
- *
- * Note that ClientAuthentication() [libfq/auth.c] sometimes calls
- * 'ereport(FATAL)' before calling the hook, so we can't log all
- * authentication errors here.
- */
-
-static void
-log_client_authentication(Port *port, int status)
-{
-	const char *auth_method = NULL;
-
-	switch(port->hba->auth_method)
-	{
-		case uaReject:
-		case uaImplicitReject:
-			auth_method = "reject";
-			break;
-		case uaTrust:
-			auth_method = "trust";
-			break;
-		case uaIdent:
-			auth_method = "ident";
-			break;
-		case uaPassword:
-			auth_method = "password";
-			break;
-		case uaMD5:
-			auth_method = "md5";
-			break;
-		case uaGSS:
-			auth_method = "gss";
-			break;
-		case uaSSPI:
-			auth_method = "sspi";
-			break;
-		case uaPAM:
-			auth_method = "pam";
-			break;
-		case uaLDAP:
-			auth_method = "ldap";
-			break;
-		case uaCert:
-			auth_method = "cert";
-			break;
-		case uaRADIUS:
-			auth_method = "radius";
-			break;
-		case uaPeer:
-			auth_method = "peer";
-			break;
-		default:
-			/* Just in case a new method gets added... */
-			auth_method = "unknown";
-	}
-
-	/* TODO: can we get the role's OID? It might be useful to
-	 * log that (e.g. to help identify roles even if the name
-	 * was changed), however at this point in the authentication
-	 * process GetUserId() returns 0
-	 */
-
-	ereport(LOG, (errmsg("[AUDIT]:LOGIN,%s,%s,%s,%s,%s,%i",
-						 make_timestamp(),
-						 port->user_name,
-						 port->remote_host,
-						 auth_method,
-						 port->database_name,
-						 status)));
-}
-
 /*
  * Log DML operations via executor permissions checks. We get a list of
  * RangeTableEntries from the query. We log each fully-qualified table
@@ -538,20 +463,9 @@ log_object_access(ObjectAccessType access,
  * aborted transaction.
  */
 
-static ClientAuthentication_hook_type next_ClientAuthentication_hook = NULL;
 static ExecutorCheckPerms_hook_type next_ExecutorCheckPerms_hook = NULL;
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type next_object_access_hook = NULL;
-
-static void
-pgaudit_ClientAuthentication_hook(Port *port, int status)
-{
-	if (pgaudit_enabled)
-		log_client_authentication(port, status);
-
-	if (next_ClientAuthentication_hook)
-		(*next_ClientAuthentication_hook) (port, status);
-}
 
 static bool
 pgaudit_ExecutorCheckPerms_hook(List *rangeTabls, bool abort)
@@ -627,9 +541,6 @@ _PG_init(void)
 							 NULL,
 							 NULL,
 							 NULL);
-
-	next_ClientAuthentication_hook = ClientAuthentication_hook;
-	ClientAuthentication_hook = pgaudit_ClientAuthentication_hook;
 
 	next_object_access_hook = object_access_hook;
 	object_access_hook = pgaudit_object_access_hook;
