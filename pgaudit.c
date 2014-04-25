@@ -522,7 +522,9 @@ log_object_access(ObjectAccessType access,
 {
 	/*
 	 * The event triggers defined above cover most of the cases we
-	 * would see here, so we do nothing for now.
+	 * would see here, so we do nothing for now. In future, we may use
+	 * this hook to provide limited backwards-compability when event
+	 * triggers are not available.
 	 */
 }
 
