@@ -1,9 +1,9 @@
 pgaudit
 =======
 
-This is an experimental auditing module for Postgres. It depends on
-event triggers, and can log DDL and DML (including read-only access
-to tables via SELECT).
+This is the initial version of an auditing module for Postgres. It
+depends on event triggers, and can log DDL and DML (including read-only
+access to tables via SELECT).
 
 Installation
 ------------
@@ -30,7 +30,8 @@ Then, edit postgresql.conf and set the following:
 
 Auditing will then be globally enabled once the server is restarted. In
 future, there will be more fine-grained control over what is audited,
-and when. For the moment, there's only a big red switch.
+and when. For the moment, there's only a big red switch that can only
+be changed with a server restart.
 
 Here's an example of some log output:
 
