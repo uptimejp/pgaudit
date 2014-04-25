@@ -26,25 +26,21 @@
 
 #include <time.h>
 
+#include "access/xact.h"
 #include "catalog/objectaccess.h"
 #include "commands/event_trigger.h"
 #include "executor/executor.h"
 #include "executor/spi.h"
 #include "miscadmin.h"
-#include "lib/stringinfo.h"
-#include "fmgr.h"
 #include "libpq/auth.h"
-#include "pgtime.h"
-#include "utils/builtins.h"
-#include "utils/memutils.h"
-#include "utils/guc.h"
 #include "tcop/utility.h"
 #include "utils/acl.h"
-#include "utils/ruleutils.h"
+#include "utils/builtins.h"
+#include "utils/guc.h"
 #include "utils/lsyscache.h"
+#include "utils/memutils.h"
 #include "utils/rel.h"
-
-#define TSBUF_LEN 128
+#include "utils/ruleutils.h"
 
 PG_MODULE_MAGIC;
 
@@ -52,17 +48,18 @@ void _PG_init(void);
 
 static bool pgaudit_enabled;
 
-char tsbuf[TSBUF_LEN];
-
 Datum pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS);
 Datum pgaudit_func_sql_drop(PG_FUNCTION_ARGS);
-static char *make_timestamp(void);
 
 PG_FUNCTION_INFO_V1(pgaudit_func_ddl_command_end);
 PG_FUNCTION_INFO_V1(pgaudit_func_sql_drop);
 
+static char *make_timestamp(void);
+
 /*
  * A ddl_command_end event trigger to log commands that we can deparse.
+ * This trigger is called at the end of any DDL command that has event
+ * trigger support.
  */
 
 Datum
@@ -71,19 +68,26 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 	EventTriggerData *trigdata;
 	int               ret, row;
 	TupleDesc		  spi_tupdesc;
+	const char		 *query_get_creation_commands;
 
 	MemoryContext tmpcontext;
 	MemoryContext oldcontext;
-
-	const char *query_get_creation_commands =
-		"SELECT classid, objid, objsubid, object_type, schema, identity, command"
-		"  FROM pg_event_trigger_get_creation_commands()";
 
 	if (!pgaudit_enabled)
 		PG_RETURN_NULL();
 
 	if (!CALLED_AS_EVENT_TRIGGER(fcinfo))
 		elog(ERROR, "not fired by event trigger manager");
+
+	/*
+	 * This query returns the objects affected by the DDL, and a JSON
+	 * representation of the parsed command. We use SPI to execute it,
+	 * and compose one log entry per object in the results.
+	 */
+
+	query_get_creation_commands =
+		"SELECT classid, objid, objsubid, object_type, schema, identity, command"
+		"  FROM pg_event_trigger_get_creation_commands()";
 
 	tmpcontext = AllocSetContextCreate(CurrentMemoryContext,
 									   "pgaudit_func_ddl_command_end temporary context",
@@ -120,6 +124,12 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 		ereport(DEBUG1, (errmsg("%s", command_formatted),
 						 errhidestmt(true)));
 
+		/*
+		 * pg_event_trigger_expand_command() takes the JSON
+		 * representation of a command and deparses it back into a
+		 * fully-qualified version of the command.
+		 */
+
 		json = SPI_getbinval(spi_tuple, spi_tupdesc, 7, &isnull);
 		command = DirectFunctionCall1(pg_event_trigger_expand_command, json);
 		command_text = TextDatumGetCString(command);
@@ -143,7 +153,9 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 }
 
 /*
- * An sql_drop event trigger to log commands that we can deparse.
+ * An sql_drop event trigger to log dropped objects. At the moment, we
+ * do not have the ability to deparse these commands, but once support
+ * for the is added upstream, it's easy to implement.
  */
 
 Datum
@@ -152,19 +164,27 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 	EventTriggerData *trigdata;
 	TupleDesc		  spi_tupdesc;
 	int               ret, row;
+	const char		 *query_dropped_objects;
 
 	MemoryContext tmpcontext;
 	MemoryContext oldcontext;
-
-	const char *query_dropped_objects =
-		"SELECT classid, objid, objsubid, object_type, schema_name, object_name, object_identity"
-		"  FROM pg_event_trigger_dropped_objects()";
 
 	if (!pgaudit_enabled)
 		PG_RETURN_NULL();
 
 	if (!CALLED_AS_EVENT_TRIGGER(fcinfo))
 		elog(ERROR, "not fired by event trigger manager");
+
+	/*
+	 * This query returns a list of objects dropped by the command
+	 * (which no longer exist, and thus cannot be looked up). With
+	 * no support for deparsing the command, the best we can do is
+	 * to log the identity of the objects.
+	 */
+
+	query_dropped_objects =
+		"SELECT classid, objid, objsubid, object_type, schema_name, object_name, object_identity"
+		"  FROM pg_event_trigger_dropped_objects()";
 
 	tmpcontext = AllocSetContextCreate(CurrentMemoryContext,
 									   "pgaudit_func_sql_drop temporary context",
@@ -289,7 +309,9 @@ log_client_authentication(Port *port, int status)
 }
 
 /*
- * Log DML operations via executor permissions checks.
+ * Log DML operations via executor permissions checks. We get a list of
+ * RangeTableEntries from the query. We log each fully-qualified table
+ * name along with the required access permissions.
  */
 
 static void
@@ -305,13 +327,21 @@ log_executor_check_perms(List *rangeTabls, bool abort_on_violation)
 		char perms[5];
 		int ip = 0;
 
+		/* We only care about tables, and can ignore subqueries etc. */
 		if (rte->rtekind != RTE_RELATION)
 			continue;
 
+		/* Get the fully-qualified name of the relation. */
 		rel = relation_open(rte->relid, NoLock);
 		relname = quote_qualified_identifier(get_namespace_name(RelationGetNamespace(rel)),
 											 RelationGetRelationName(rel));
 		relation_close(rel, NoLock);
+
+		/*
+		 * Decode the rte->requiredPerms bitmap into an array of
+		 * characters. This is just a convenient representation
+		 * with some precedent; it may not be the most useful.
+		 */
 
 		if (rte->requiredPerms & ACL_SELECT)
 			perms[ip++] = ACL_SELECT_CHR;
@@ -366,6 +396,11 @@ log_utility_command(Node *parsetree,
 
 	switch (nodeTag(parsetree))
 	{
+		/*
+		 * The following statements are never supported by event
+		 * triggers.
+		 */
+
 		case T_TransactionStmt:
 		case T_PlannedStmt:
 		case T_ClosePortalStmt:
@@ -410,9 +445,13 @@ log_utility_command(Node *parsetree,
 		case T_ConstraintsSetStmt:
 		case T_CheckPointStmt:
 		case T_ReindexStmt:
-			/* These statements are not supported by event triggers. */
 			supported_stmt = false;
 			break;
+
+		/*
+		 * The following statements are supported by event triggers for
+		 * certain object types.
+		 */
 
 		case T_DropStmt:
 			{
@@ -450,8 +489,11 @@ log_utility_command(Node *parsetree,
 			}
 			break;
 
+		/*
+		 * All other statement types have event trigger support
+		 */
+
 		default:
-			/* All other statement types have event trigger support */
 			break;
 	}
 
@@ -489,7 +531,9 @@ log_object_access(ObjectAccessType access,
  * --------------
  *
  * These functions (which are installed by _PG_init, below) just call
- * pgaudit logging functions before continuing the chain of hooks.
+ * pgaudit logging functions before continuing the chain of hooks. We
+ * need to be careful to not call any logging functions inside an
+ * aborted transaction.
  */
 
 static ClientAuthentication_hook_type next_ClientAuthentication_hook = NULL;
@@ -601,6 +645,9 @@ _PG_init(void)
  */
 
 /* Quick'n'dirty timestamp generation */
+
+#define TSBUF_LEN 128
+char tsbuf[TSBUF_LEN];
 
 static char *make_timestamp(void)
 {
