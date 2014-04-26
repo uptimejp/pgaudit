@@ -673,6 +673,22 @@ check_pgaudit_log(char **newval, void **extra, GucSource source)
 	ListCell *lt;
 	uint64 *f;
 
+	/*
+	 * Once auditing is enabled, it would be nice to refuse to let it be
+	 * disabled, even by superusers. Even if someone were able to obtain
+	 * superuser access without authorisation, their actions would still
+	 * be logged. Alas, it isn't possible to do this securely.
+	 *
+	 * Instead, we settle for some minimal protection by refusing
+	 * client-level and interactive settings.
+	 */
+
+	if (source > PGC_S_DATABASE_USER)
+	{
+		GUC_check_errmsg("parameter \"pgaudit.log\" cannot be changed now");
+		return false;
+	}
+
 	/* Make sure we have a comma-separated list of tokens. */
 
 	rawval = pstrdup(*newval);
