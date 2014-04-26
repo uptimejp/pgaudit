@@ -18,7 +18,7 @@ What about log_statement = 'all'?
 
 1. pgaudit logs fully-qualified names
 
-A query like "delete from x" in the log file can be interpreted only
+A query like «delete from x» in the log file can be interpreted only
 with reference to the current search_path setting. In contrast, this
 module always logs fully-qualified object names, e.g. "public.x".
 
@@ -29,7 +29,7 @@ as supplied by the user.
 2. pgaudit creates a log entry for each affected object
 
 A query that refers to multiple objects results in a log entry for each
-object involved, so the effects of "select * from some_view" can be seen
+object involved, so the effects of «select * from some_view» can be seen
 rather than inferred. Searching for all accesses to a particular table
 is also straightforward.
 
@@ -120,6 +120,13 @@ See DESIGN for more details.
 
 Known problems
 --------------
+
+Statements are audit-logged even if the transaction they're in is later
+rolled back. This is sometimes desirable (e.g. with SELECT), but makes
+it more difficult to tell what happened.
+
+Some utility statements are audit-logged even though they subsequently
+fail (e.g. «set shared_buffers = '32MB'»).
 
 Deparsed query text is only available for CREATE, not DROP.
 
