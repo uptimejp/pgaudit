@@ -84,7 +84,7 @@ typedef struct {
  * can be logged without error checking).
  */
 
-void
+static void
 log_audit_event(AuditEvent *e)
 {
 	const char *timestamp;
