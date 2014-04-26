@@ -683,7 +683,6 @@ check_pgaudit_log(char **newval, void **extra, GucSource source)
 		pfree(rawval);
 		return false;
 	}
-	pfree(rawval);
 
 	/*
 	 * Check that we recognise each token, and add it to the bitmap
@@ -720,10 +719,13 @@ check_pgaudit_log(char **newval, void **extra, GucSource source)
 		else
 		{
 			free(f);
+			pfree(rawval);
 			list_free(flags);
 			return false;
 		}
 	}
+
+	pfree(rawval);
 
 	/*
 	 * All well, store the bitmap for assign_pgaudit_log.
