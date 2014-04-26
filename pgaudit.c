@@ -738,14 +738,14 @@ check_pgaudit_log(char **newval, void **extra, GucSource source)
 
 /*
  * Set pgaudit_log from extra (ignoring newval, which has already been
- * converted to a bitmap above). We set the value only if auditing is
- * currently disabled.
+ * converted to a bitmap above). Note that extra may not be set if the
+ * assignment is to be suppressed.
  */
 
 static void
 assign_pgaudit_log(const char *newval, void *extra)
 {
-	if (pgaudit_log == 0)
+	if (extra)
 		pgaudit_log = *(uint64 *)extra;
 }
 
