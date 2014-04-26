@@ -24,8 +24,6 @@
 
 #include "postgres.h"
 
-#include <time.h>
-
 #include "access/xact.h"
 #include "catalog/objectaccess.h"
 #include "commands/event_trigger.h"
