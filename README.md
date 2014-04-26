@@ -39,10 +39,6 @@ With log_statement, one may select none, ddl, mod, or all. With pgaudit,
 individual groups of commands may be selected for logging. Want to log
 only GRANT/REVOKE operations? You can.
 
-4. pgaudit cannot be turned off
-
-…pending…
-
 On the other hand, pgaudit does not currently log the names or values of
 columns read or written by a query, nor does it have access to the query
 text. (But see "Future improvements" below.)
@@ -76,7 +72,31 @@ Then start the server and run:
 Configuration
 -------------
 
-…pending…
+Audit logging is controlled by the pgaudit.log configuration variable,
+which may be set to a comma-separated list of tokens identifying what
+classes of commands to log. For example,
+
+	pgaudit.log = 'read, write, user'
+
+The currently valid logging classes are:
+
+	none		Don't log anything
+	read		SELECT commands
+	write		INSERT, UPDATE, DELETE, TRUNCATE
+	privilege	GRANT, REVOKE, etc.
+	user		CREATE/DROP/ALTER ROLE
+	definition	DDL: CREATE/DROP/ALTER for tables, etc.
+	config		CREATE OPERATOR, etc.
+	admin		VACUUM, REINDEX, ANALYSE, …
+
+pgaudit.log may be set in postgresql.conf (to apply globally), or as a
+per-database or per-user setting:
+
+	ALTER DATABASE xxx SET pgaudit.log = '…'
+
+or:
+
+	ALTER ROLE xxx SET pgaudit.log = '…'
 
 Log format
 ----------
@@ -104,7 +124,7 @@ Here are some examples of log output:
 
 LOG:  [AUDIT],2014-04-25 22:27:23.658128+05:30,ams,ams,DML,SELECT,TABLE,pg_catalog.pg_class,
 LOG:  [AUDIT],2014-04-25 22:27:23.658189+05:30,ams,ams,DML,SELECT,TABLE,pg_catalog.pg_namespace,
-LOG:  [AUDIT],2014-04-25 22:27:41.149732+05:30,ams,ams,DDL,CREATE TABLE,table,public.a,CREATE  TABLE  public.a (a pg_catalog.int4   , b pg_catalog.text   COLLATE pg_catalog."default")   WITH (oids=OFF) 
+LOG:  [AUDIT],2014-04-25 22:27:41.149732+05:30,ams,ams,DDL,CREATE TABLE,table,public.a,CREATE  TABLE  public.a (a pg_catalog.int4   , b pg_catalog.text   COLLATE pg_catalog."default")   WITH (oids=OFF)
 LOG:  [AUDIT],2014-04-25 22:27:41.163687+05:30,ams,ams,DML,INSERT,TABLE,public.a,
 
 Design overview
