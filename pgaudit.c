@@ -772,7 +772,7 @@ _PG_init(void)
 							   NULL,
 							   &pgaudit_log_str,
 							   "none",
-							   PGC_SIGHUP,
+							   PGC_SUSET,
 							   GUC_LIST_INPUT | GUC_NOT_IN_SAMPLE,
 							   check_pgaudit_log,
 							   assign_pgaudit_log,
