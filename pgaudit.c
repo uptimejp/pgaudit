@@ -903,10 +903,7 @@ static void
 assign_pgaudit_log(const char *newval, void *extra)
 {
 	if (extra)
-	{
 		pgaudit_log = *(uint64 *)extra;
-		free(extra);
-	}
 }
 
 /*
