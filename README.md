@@ -123,10 +123,12 @@ Note that not all fields are always available.
 
 Here are some examples of log output:
 
-LOG:  [AUDIT],2014-04-25 22:27:23.658128+05:30,ams,ams,DML,SELECT,TABLE,pg_catalog.pg_class,
-LOG:  [AUDIT],2014-04-25 22:27:23.658189+05:30,ams,ams,DML,SELECT,TABLE,pg_catalog.pg_namespace,
-LOG:  [AUDIT],2014-04-25 22:27:41.149732+05:30,ams,ams,DDL,CREATE TABLE,table,public.a,CREATE  TABLE  public.a (a pg_catalog.int4   , b pg_catalog.text   COLLATE pg_catalog."default")   WITH (oids=OFF)
-LOG:  [AUDIT],2014-04-25 22:27:41.163687+05:30,ams,ams,DML,INSERT,TABLE,public.a,
+LOG:  [AUDIT],2014-04-27 14:03:53.929591+05:30,ams,ams,DEFINITION,CREATE TABLE,table,public.x,CREATE  TABLE  public.x (a pg_catalog.int4   , b pg_catalog.text   COLLATE pg_catalog."default")   WITH (oids=OFF) 
+LOG:  [AUDIT],2014-04-27 14:04:12.213188+05:30,ams,ams,WRITE,INSERT,TABLE,public.x,
+LOG:  [AUDIT],2014-04-27 14:04:17.156958+05:30,ams,ams,READ,SELECT,TABLE,public.x,
+LOG:  [AUDIT],2014-04-27 14:04:24.184501+05:30,ams,ams,DEFINITION,ALTER TABLE,table,public.x,ALTER TABLE public.x ADD COLUMN c pg_catalog.date   
+LOG:  [AUDIT],2014-04-27 14:04:32.934951+05:30,ams,ams,WRITE,UPDATE,TABLE,public.x,
+LOG:  [AUDIT],2014-04-27 14:04:38.492788+05:30,ams,ams,ADMIN,VACUUM,,,vacuum x;
 
 Design overview
 ---------------
