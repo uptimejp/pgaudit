@@ -246,7 +246,7 @@ should_be_logged(AuditEvent *e, const char **classname)
 
 	/* Is the desired class enabled? */
 
-	if ((pgaudit_log & class) == 0)
+	if ((pgaudit_log & class) != class)
 		return false;
 
 	*classname = name;
