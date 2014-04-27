@@ -31,6 +31,7 @@
 #include "executor/spi.h"
 #include "miscadmin.h"
 #include "libpq/auth.h"
+#include "nodes/nodes.h"
 #include "tcop/utility.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
@@ -84,6 +85,9 @@ enum LogClass {
 
 	/* VACUUM, REINDEX, ANALYZE */
 	LOG_ADMIN = (1 << 6),
+
+	/* Absolutely everything */
+	LOG_ALL = ~(uint64)0
 };
 
 /*
@@ -96,14 +100,8 @@ enum LogClass {
  * multiple AuditEvents must be created to represent it.
  */
 
-typedef enum {
-	EVENT_DDL,
-	EVENT_DML,
-	EVENT_UTIL
-} Event;
-
 typedef struct {
-	Event event;
+	NodeTag type;
 	const char *object_id;
 	const char *object_type;
 	const char *command_tag;
@@ -111,10 +109,155 @@ typedef struct {
 } AuditEvent;
 
 /*
- * Receives an AuditEvent and decides whether to log it (depending on
- * configuration) and how. The AuditEvent is assumed to be completely
- * filled in by the caller (unknown values must be set to "" so that
- * they can be logged without error checking).
+ * Takes an AuditEvent and returns true or false depending on whether
+ * the event should be logged according to the pgaudit.log setting. If
+ * it returns true, it also fills in the name of the LogClass which it
+ * is to be logged under.
+ */
+
+static bool
+should_be_logged(AuditEvent *e, const char **classname)
+{
+	enum LogClass class = LOG_NONE;
+	char *name;
+
+	/*
+	 * Look at the type of the command and decide what LogClass needs to
+	 * be enabled for the command to be logged.
+	 */
+
+	switch (e->type)
+	{
+		case T_SelectStmt:
+			name = "READ";
+			class = LOG_READ;
+			break;
+
+		case T_InsertStmt:
+		case T_UpdateStmt:
+		case T_DeleteStmt:
+		case T_TruncateStmt:
+			name = "WRITE";
+			class = LOG_WRITE;
+			break;
+
+		case T_GrantStmt:
+		case T_GrantRoleStmt:
+		case T_AlterDefaultPrivilegesStmt:
+		case T_AlterOwnerStmt:
+			name = "PRIVILEGE";
+			class = LOG_PRIVILEGE;
+			break;
+
+		case T_CreateRoleStmt:
+		case T_AlterRoleStmt:
+		case T_DropRoleStmt:
+			name = "USER";
+			class = LOG_USER;
+			break;
+
+		case T_AlterTableStmt:
+		case T_AlterTableCmd:
+		case T_AlterDomainStmt:
+		case T_CreateStmt:
+		case T_DefineStmt:
+		case T_DropStmt:
+		case T_CommentStmt:
+		case T_IndexStmt:
+		case T_LockStmt:
+		case T_CreateFunctionStmt:
+		case T_AlterFunctionStmt:
+		case T_DoStmt:
+		case T_RenameStmt:
+		case T_RuleStmt:
+		case T_ViewStmt:
+		case T_CreateDomainStmt:
+		case T_CreateTableAsStmt:
+		case T_CreateSeqStmt:
+		case T_AlterSeqStmt:
+		case T_CreateTrigStmt:
+		case T_CreateSchemaStmt:
+		case T_AlterObjectSchemaStmt:
+		case T_CreateEnumStmt:
+		case T_CreateRangeStmt:
+		case T_AlterEnumStmt:
+			name = "DEFINITION";
+			class = LOG_DEFINITION;
+			break;
+
+		case T_CreatePLangStmt:
+		case T_CreateConversionStmt:
+		case T_CreateCastStmt:
+		case T_CreateOpClassStmt:
+		case T_CreateOpFamilyStmt:
+		case T_AlterOpFamilyStmt:
+		case T_CompositeTypeStmt:
+		case T_AlterTSDictionaryStmt:
+		case T_AlterTSConfigurationStmt:
+			name = "CONFIG";
+			class = LOG_CONFIG;
+			break;
+
+		case T_ClusterStmt:
+		case T_CreatedbStmt:
+		case T_DropdbStmt:
+		case T_LoadStmt:
+		case T_VacuumStmt:
+		case T_ExplainStmt:
+		case T_VariableSetStmt:
+		case T_DiscardStmt:
+		case T_ReindexStmt:
+		case T_CheckPointStmt:
+		case T_AlterDatabaseStmt:
+		case T_AlterDatabaseSetStmt:
+		case T_AlterRoleSetStmt:
+		case T_CreateTableSpaceStmt:
+		case T_DropTableSpaceStmt:
+		case T_DropOwnedStmt:
+		case T_ReassignOwnedStmt:
+		case T_CreateFdwStmt:
+		case T_AlterFdwStmt:
+		case T_CreateForeignServerStmt:
+		case T_AlterForeignServerStmt:
+		case T_CreateUserMappingStmt:
+		case T_AlterUserMappingStmt:
+		case T_DropUserMappingStmt:
+		case T_AlterTableSpaceOptionsStmt:
+		case T_AlterTableSpaceMoveStmt:
+		case T_SecLabelStmt:
+		case T_CreateForeignTableStmt:
+		case T_CreateExtensionStmt:
+		case T_AlterExtensionStmt:
+		case T_AlterExtensionContentsStmt:
+		case T_CreateEventTrigStmt:
+		case T_AlterEventTrigStmt:
+		case T_RefreshMatViewStmt:
+		case T_ReplicaIdentityStmt:
+		case T_AlterSystemStmt:
+			name = "ADMIN";
+			class = LOG_ADMIN;
+			break;
+
+		default:
+			name = "UNKNOWN";
+			class = LOG_ALL;
+			break;
+	}
+
+	/* Is the desired class enabled? */
+
+	if ((pgaudit_log & class) == 0)
+		return false;
+
+	*classname = name;
+	return true;
+}
+
+/*
+ * Takes an AuditEvent and, if it should_be_logged(), writes it to the
+ * audit log. The AuditEvent is assumed to be completely filled in by
+ * the caller (unknown values must be set to "" so that they can be
+ * logged without error checking).
  */
 
 static void
@@ -123,32 +266,14 @@ log_audit_event(AuditEvent *e)
 	const char *timestamp;
 	const char *username;
 	const char *eusername;
-	const char *eventname;
+	const char *classname;
 
-	/*
-	 * XXX Check pgaudit_log to see if this event should be logged at
-	 * all. (We know logging is enabled, otherwise an AuditEvent would
-	 * not have been created in the first place.)
-	 */
+	if (!should_be_logged(e, &classname))
+		return;
 
 	timestamp = timestamptz_to_str(GetCurrentTimestamp());
 	username = GetUserNameFromId(GetSessionUserId());
 	eusername = GetUserNameFromId(GetUserId());
-
-	switch (e->event) {
-		case EVENT_DDL:
-			eventname = "DDL";
-			break;
-		case EVENT_DML:
-			eventname = "DML";
-			break;
-		case EVENT_UTIL:
-			eventname = "UTIL";
-			break;
-		default:
-			eventname = "???";
-			break;
-	}
 
 	/*
 	 * For now, we only support logging via ereport(). In future, we may
@@ -157,7 +282,7 @@ log_audit_event(AuditEvent *e)
 
 	ereport(LOG,
 			(errmsg("[AUDIT],%s,%s,%s,%s,%s,%s,%s,%s",
-					timestamp, username, eusername, eventname,
+					timestamp, username, eusername, classname,
 					e->command_tag, e->object_type, e->object_id,
 					e->command_text)));
 }
@@ -239,7 +364,7 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 		json = SPI_getbinval(spi_tuple, spi_tupdesc, 7, &isnull);
 		command = DirectFunctionCall1(pg_event_trigger_expand_command, json);
 
-		e.event = EVENT_DDL;
+		e.type = nodeTag(trigdata->parsetree);
 		e.object_id = SPI_getvalue(spi_tuple, spi_tupdesc, 6);
 		e.object_type = SPI_getvalue(spi_tuple, spi_tupdesc, 4);
 		e.command_tag = trigdata->tag;
@@ -314,7 +439,7 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 
 		spi_tuple = SPI_tuptable->vals[row];
 
-		e.event = EVENT_DDL;
+		e.type = nodeTag(trigdata->parsetree);
 		e.object_id = SPI_getvalue(spi_tuple, spi_tupdesc, 7);
 		e.object_type = SPI_getvalue(spi_tuple, spi_tupdesc, 4);
 		e.command_tag = trigdata->tag;
@@ -348,6 +473,7 @@ log_executor_check_perms(List *rangeTabls, bool abort_on_violation)
 		char *relname;
 		const char *tag;
 		const char *reltype;
+		NodeTag type;
 
 		/* We only care about tables, and can ignore subqueries etc. */
 		if (rte->rtekind != RTE_RELATION)
@@ -360,7 +486,37 @@ log_executor_check_perms(List *rangeTabls, bool abort_on_violation)
 											 RelationGetRelationName(rel));
 		relation_close(rel, NoLock);
 
-		/* Decode rte->relkind into an object type. */
+		/*
+		 * We don't have access to the parsetree here, so we have to
+		 * generate the node type, object type, and command tag by
+		 * decoding rte->requiredPerms and rte->relkind.
+		 */
+
+		if (rte->requiredPerms & ACL_INSERT)
+		{
+			tag = "INSERT";
+			type = T_InsertStmt;
+		}
+		else if (rte->requiredPerms & ACL_UPDATE)
+		{
+			tag = "UPDATE";
+			type = T_UpdateStmt;
+		}
+		else if (rte->requiredPerms & ACL_DELETE)
+		{
+			tag = "DELETE";
+			type = T_DeleteStmt;
+		}
+		else if (rte->requiredPerms & ACL_SELECT)
+		{
+			tag = "SELECT";
+			type = T_SelectStmt;
+		}
+		else
+		{
+			tag = "UNKNOWN";
+			type = T_Invalid;
+		}
 
 		switch (rte->relkind)
 		{
@@ -401,25 +557,12 @@ log_executor_check_perms(List *rangeTabls, bool abort_on_violation)
 				break;
 		}
 
-		/* Decode the rte->requiredPerms bitmap into a command tag. */
-
-		if (rte->requiredPerms & ACL_INSERT)
-			tag = "INSERT";
-		else if (rte->requiredPerms & ACL_UPDATE)
-			tag = "UPDATE";
-		else if (rte->requiredPerms & ACL_DELETE)
-			tag = "DELETE";
-		else if (rte->requiredPerms & ACL_SELECT)
-			tag = "SELECT";
-		else
-			tag = "UNKNOWN";
-
 		/*
 		 * XXX We could also decode rte->selectedCols and
 		 * rte->modifiedCols here.
 		 */
 
-		e.event = EVENT_DML;
+		e.type = type;
 		e.object_id = relname;
 		e.object_type = reltype;
 		e.command_tag = tag;
@@ -564,15 +707,10 @@ log_utility_command(Node *parsetree,
 	if (supported_stmt)
 		return;
 
-	/*
-	 * XXX Perhaps we should synthesise a command_tag here based on the
-	 * nodeTag(). It might be useful for filtering, at least.
-	 */
-
-	e.event = EVENT_UTIL;
+	e.type = nodeTag(parsetree);
 	e.object_id = "";
 	e.object_type = "";
-	e.command_tag = "";
+	e.command_tag = CreateCommandTag(parsetree);
 	e.command_text = queryString;
 
 	log_audit_event(&e);
@@ -733,7 +871,7 @@ check_pgaudit_log(char **newval, void **extra, GucSource source)
 		else if (pg_strcasecmp(token, "admin") == 0)
 			*f |= LOG_ADMIN;
 		else if (pg_strcasecmp(token, "all") == 0)
-			*f = ~(uint64)0;
+			*f = LOG_ALL;
 		else
 		{
 			free(f);
