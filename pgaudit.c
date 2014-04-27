@@ -742,6 +742,7 @@ check_pgaudit_log(char **newval, void **extra, GucSource source)
 	}
 
 	pfree(rawval);
+	list_free(flags);
 
 	/*
 	 * All well, store the bitmap for assign_pgaudit_log.
@@ -762,7 +763,10 @@ static void
 assign_pgaudit_log(const char *newval, void *extra)
 {
 	if (extra)
+	{
 		pgaudit_log = *(uint64 *)extra;
+		free(extra);
+	}
 }
 
 /*
