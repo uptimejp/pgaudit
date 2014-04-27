@@ -282,8 +282,8 @@ log_audit_event(AuditEvent *e)
 	eusername = GetUserNameFromId(GetUserId());
 
 	/*
-	 * For now, we only support logging via ereport(). In future, we may
-	 * log to a separate file, or a table.
+	 * XXX We only support logging via ereport(). In future, we may log
+	 * to a separate file or a table.
 	 */
 
 	ereport(LOG,
