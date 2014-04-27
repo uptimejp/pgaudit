@@ -24,8 +24,10 @@
 
 #include "postgres.h"
 
+#include "access/htup_details.h"
 #include "access/xact.h"
 #include "catalog/objectaccess.h"
+#include "catalog/pg_proc.h"
 #include "commands/event_trigger.h"
 #include "executor/executor.h"
 #include "executor/spi.h"
@@ -40,6 +42,7 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/ruleutils.h"
+#include "utils/syscache.h"
 #include "utils/timestamp.h"
 
 PG_MODULE_MAGIC;
@@ -734,12 +737,50 @@ log_object_access(ObjectAccessType access,
 				  int subId,
 				  void *arg)
 {
-	/*
-	 * The event triggers defined above cover most of the cases we
-	 * would see here, so we do nothing for now. In future, we may use
-	 * this hook to provide limited backwards-compability when event
-	 * triggers are not available.
-	 */
+	AuditEvent e;
+
+	switch (access)
+	{
+		case OAT_FUNCTION_EXECUTE:
+			{
+				HeapTuple proctup;
+				Form_pg_proc proc;
+				const char *name;
+
+				proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(objectId));
+				if (!proctup)
+					elog(ERROR, "cache lookup failed for function %u", objectId);
+				proc = (Form_pg_proc) GETSTRUCT(proctup);
+				name = quote_qualified_identifier(get_namespace_name(proc->pronamespace),
+												  NameStr(proc->proname));
+
+				e.type = T_ExecuteStmt;
+				e.object_id = name;
+				e.object_type = "FUNCTION";
+				e.command_tag = "EXECUTE";
+				e.command_text = "";
+
+				ReleaseSysCache(proctup);
+			}
+			break;
+
+		default:
+		case OAT_NAMESPACE_SEARCH:
+			/* Not relevant to our purposes. */
+
+		case OAT_POST_CREATE:
+		case OAT_POST_ALTER:
+		case OAT_DROP:
+			/*
+			 * The event triggers defined above cover these cases, so we
+			 * ignore them. In theory we could provide limited backwards
+			 * compatibility here if event triggers aren't available.
+			 */
+			return;
+			break;
+	}
+
+	log_audit_event(&e);
 }
 
 /*

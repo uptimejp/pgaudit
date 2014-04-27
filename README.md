@@ -144,8 +144,6 @@ See DESIGN for more details.
 Known problems
 --------------
 
-We don't log function execution yet.
-
 Statements are audit-logged even if the transaction they're in is later
 rolled back. This is sometimes desirable (e.g. with SELECT), but makes
 it more difficult to tell what happened.
