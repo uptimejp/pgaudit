@@ -748,8 +748,7 @@ log_object_access(ObjectAccessType access,
  *
  * These functions (which are installed by _PG_init, below) just call
  * pgaudit logging functions before continuing the chain of hooks. We
- * must be careful to not call any logging functions from an aborted
- * transaction.
+ * must not call any logging functions from an aborted transaction.
  */
 
 static ExecutorCheckPerms_hook_type next_ExecutorCheckPerms_hook = NULL;
