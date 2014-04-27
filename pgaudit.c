@@ -732,6 +732,8 @@ check_pgaudit_log(char **newval, void **extra, GucSource source)
 			*f |= LOG_CONFIG;
 		else if (pg_strcasecmp(token, "admin") == 0)
 			*f |= LOG_ADMIN;
+		else if (pg_strcasecmp(token, "all") == 0)
+			*f = ~(uint64)0;
 		else
 		{
 			free(f);
