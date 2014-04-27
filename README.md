@@ -80,14 +80,15 @@ classes of commands to log. For example,
 
 The currently valid logging classes are:
 
-	none		Don't log anything
-	read		SELECT commands
-	write		INSERT, UPDATE, DELETE, TRUNCATE
-	privilege	GRANT, REVOKE, etc.
-	user		CREATE/DROP/ALTER ROLE
-	definition	DDL: CREATE/DROP/ALTER for tables, etc.
-	config		CREATE OPERATOR, etc.
-	admin		VACUUM, REINDEX, ANALYSE, …
+	NONE		Don't log anything
+	READ		SELECT commands
+	WRITE		INSERT, UPDATE, DELETE, TRUNCATE
+	PRIVILEGE	GRANT, REVOKE, etc.
+	USER		CREATE/DROP/ALTER ROLE
+	DEFINITION	DDL: CREATE/DROP/ALTER for tables, etc.
+	CONFIG		CREATE OPERATOR, etc.
+	ADMIN		VACUUM, REINDEX, ANALYSE, …
+	ALL			Log absolutely everything
 
 pgaudit.log may be set in postgresql.conf (to apply globally), or as a
 per-database or per-user setting:
@@ -104,10 +105,10 @@ Log format
 We log audit events in CSV format with the following fields:
 
 	[AUDIT],<timestamp>,<username>,<effective username>,
-		<event>,<tag>,<object type>,<object id>,
+		<class>,<tag>,<object type>,<object id>,
 		<command text>
 
-<event> is DDL, DML, or UTIL.
+<class> is the name of a logging class (READ, WRITE, etc.)
 
 <tag> is the command tag (e.g. SELECT)
 
