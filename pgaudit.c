@@ -244,7 +244,13 @@ should_be_logged(AuditEvent *e, const char **classname)
 			break;
 	}
 
-	/* Is the desired class enabled? */
+	/*
+	 * Is the applicable class mentioned in pgaudit.log?
+	 *
+	 * XXX We consult only pgaudit_log now, but in future we may be able
+	 * to store relids in AuditEvent and use reloptions or some similar
+	 * mechanism to allow per-object logging configuration.
+	 */
 
 	if ((pgaudit_log & class) != class)
 		return false;
