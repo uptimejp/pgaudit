@@ -240,7 +240,6 @@ should_be_logged(AuditEvent *e, const char **classname)
 		case T_CreateEventTrigStmt:
 		case T_AlterEventTrigStmt:
 		case T_RefreshMatViewStmt:
-		case T_ReplicaIdentityStmt:
 		case T_AlterSystemStmt:
 			name = "ADMIN";
 			class = LOG_ADMIN;
