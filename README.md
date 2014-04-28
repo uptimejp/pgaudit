@@ -78,9 +78,9 @@ classes of commands to log. For example,
 
 	pgaudit.log = 'read, write, user'
 
-The currently valid logging classes are:
+pgaudit.log may be set to an empty string or "none" to disable logging,
+or to any combination of the following logging classes:
 
-	NONE		Don't log anything
 	READ		SELECT commands
 	WRITE		INSERT, UPDATE, DELETE, TRUNCATE
 	PRIVILEGE	GRANT, REVOKE, etc.
@@ -88,7 +88,6 @@ The currently valid logging classes are:
 	DEFINITION	DDL: CREATE/DROP/ALTER for tables, etc.
 	CONFIG		CREATE OPERATOR, etc.
 	ADMIN		VACUUM, REINDEX, ANALYSE, …
-	ALL			Log absolutely everything
 
 pgaudit.log may be set in postgresql.conf (to apply globally), or as a
 per-database or per-user setting:

@@ -87,7 +87,7 @@ enum LogClass {
 	/* VACUUM, REINDEX, ANALYZE */
 	LOG_ADMIN = (1 << 6),
 
-	/* Absolutely everything */
+	/* Absolutely everything; not available via pgaudit.log */
 	LOG_ALL = ~(uint64)0
 };
 
@@ -238,6 +238,12 @@ should_be_logged(AuditEvent *e, const char **classname)
 			name = "ADMIN";
 			class = LOG_ADMIN;
 			break;
+
+			/*
+			 * Anything that's left out of the list above is just noise,
+			 * and not very interesting from an auditing perspective. So
+			 * there's intentionally no way to enable LOG_ALL.
+			 */
 
 		default:
 			name = "UNKNOWN";
@@ -877,8 +883,6 @@ check_pgaudit_log(char **newval, void **extra, GucSource source)
 			*f |= LOG_CONFIG;
 		else if (pg_strcasecmp(token, "admin") == 0)
 			*f |= LOG_ADMIN;
-		else if (pg_strcasecmp(token, "all") == 0)
-			*f = LOG_ALL;
 		else
 		{
 			free(f);
