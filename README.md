@@ -104,7 +104,7 @@ Log format
 
 We log audit events in CSV format with the following fields:
 
-	[AUDIT],<timestamp>,<username>,<effective username>,
+	[AUDIT],<timestamp>,<database>,<username>,<effective username>,
 		<class>,<tag>,<object type>,<object id>,
 		<command text>
 
@@ -123,12 +123,13 @@ Note that not all fields are always available.
 
 Here are some examples of log output:
 
-LOG:  [AUDIT],2014-04-27 14:03:53.929591+05:30,ams,ams,DEFINITION,CREATE TABLE,table,public.x,CREATE  TABLE  public.x (a pg_catalog.int4   , b pg_catalog.text   COLLATE pg_catalog."default")   WITH (oids=OFF) 
-LOG:  [AUDIT],2014-04-27 14:04:12.213188+05:30,ams,ams,WRITE,INSERT,TABLE,public.x,
-LOG:  [AUDIT],2014-04-27 14:04:17.156958+05:30,ams,ams,READ,SELECT,TABLE,public.x,
-LOG:  [AUDIT],2014-04-27 14:04:24.184501+05:30,ams,ams,DEFINITION,ALTER TABLE,table,public.x,ALTER TABLE public.x ADD COLUMN c pg_catalog.date   
-LOG:  [AUDIT],2014-04-27 14:04:32.934951+05:30,ams,ams,WRITE,UPDATE,TABLE,public.x,
-LOG:  [AUDIT],2014-04-27 14:04:38.492788+05:30,ams,ams,ADMIN,VACUUM,,,vacuum x;
+LOG:  [AUDIT],2014-04-28 12:21:01.15293+09,auditdb,dbusr,dbusr,DEFINITION,CREATE TABLE,table,public.x,CREATE  TABLE  public.x (a pg_catalog.int4   , b pg_catalog.text   COLLATE pg_catalog."default")   WITH (oids=OFF)
+LOG:  [AUDIT],2014-04-28 12:26:11.82442+09,auditdb,dbusr,dbusr,WRITE,INSERT,TABLE,public.x,
+LOG:  [AUDIT],2014-04-28 12:26:49.157767+09,auditdb,dbusr,dbusr,READ,SELECT,TABLE,public.x,
+LOG:  [AUDIT],2014-04-28 12:27:14.26793+09,auditdb,dbusr,dbusr,DEFINITION,ALTER TABLE,table,public.x,ALTER TABLE public.x ADD COLUMN c pg_catalog.date
+LOG:  [AUDIT],2014-04-28 12:28:37.035584+09,auditdb,dbusr,dbusr,WRITE,UPDATE,TABLE,public.x,
+LOG:  [AUDIT],2014-04-28 12:28:48.378428+09,auditdb,dbusr,dbusr,ADMIN,VACUUM,,,VACUUM x ;
+
 
 Design overview
 ---------------

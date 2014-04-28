@@ -26,6 +26,7 @@
 
 #include "access/xact.h"
 #include "catalog/objectaccess.h"
+#include "commands/dbcommands.h"
 #include "commands/event_trigger.h"
 #include "executor/executor.h"
 #include "executor/spi.h"
@@ -287,8 +288,9 @@ log_audit_event(AuditEvent *e)
 	 */
 
 	ereport(LOG,
-			(errmsg("[AUDIT],%s,%s,%s,%s,%s,%s,%s,%s",
-					timestamp, username, eusername, classname,
+			(errmsg("[AUDIT],%s,%s,%s,%s,%s,%s,%s,%s,%s",
+					timestamp, get_database_name(MyDatabaseId),
+					username, eusername, classname,
 					e->command_tag, e->object_type, e->object_id,
 					e->command_text)));
 }
