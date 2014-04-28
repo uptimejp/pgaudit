@@ -456,10 +456,6 @@ log_utility_command(Node *parsetree,
 		 * triggers.
 		 */
 
-		case T_TransactionStmt:
-		case T_PlannedStmt:
-		case T_ClosePortalStmt:
-		case T_FetchStmt:
 		case T_DoStmt:
 		case T_CreateTableSpaceStmt:
 		case T_DropTableSpaceStmt:
@@ -468,26 +464,18 @@ log_utility_command(Node *parsetree,
 		case T_TruncateStmt:
 		case T_CommentStmt:
 		case T_SecLabelStmt:
-		case T_CopyStmt:
-		case T_PrepareStmt:
-		case T_ExecuteStmt:
-		case T_DeallocateStmt:
 		case T_GrantStmt:
 		case T_GrantRoleStmt:
 		case T_CreatedbStmt:
 		case T_AlterDatabaseStmt:
 		case T_AlterDatabaseSetStmt:
 		case T_DropdbStmt:
-		case T_NotifyStmt:
-		case T_ListenStmt:
-		case T_UnlistenStmt:
 		case T_LoadStmt:
 		case T_ClusterStmt:
 		case T_VacuumStmt:
 		case T_ExplainStmt:
 		case T_AlterSystemStmt:
 		case T_VariableSetStmt:
-		case T_VariableShowStmt:
 		case T_DiscardStmt:
 		case T_CreateEventTrigStmt:
 		case T_AlterEventTrigStmt:
@@ -497,7 +485,6 @@ log_utility_command(Node *parsetree,
 		case T_DropRoleStmt:
 		case T_ReassignOwnedStmt:
 		case T_LockStmt:
-		case T_ConstraintsSetStmt:
 		case T_CheckPointStmt:
 		case T_ReindexStmt:
 			supported_stmt = false;
@@ -545,7 +532,8 @@ log_utility_command(Node *parsetree,
 			break;
 
 		/*
-		 * All other statement types have event trigger support
+		 * All other statement types have event trigger support, or we
+		 * don't care about them at all.
 		 */
 
 		default:
