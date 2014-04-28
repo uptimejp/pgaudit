@@ -300,7 +300,8 @@ log_audit_event(AuditEvent *e)
 					timestamp, database,
 					username, eusername, classname,
 					e->command_tag, e->object_type, e->object_id,
-					e->command_text)));
+					e->command_text),
+			 errhidestmt(true)));
 }
 
 /*
