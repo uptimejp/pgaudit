@@ -277,6 +277,7 @@ static void
 log_audit_event(AuditEvent *e)
 {
 	const char *timestamp;
+	const char *database;
 	const char *username;
 	const char *eusername;
 	const char *classname;
@@ -285,6 +286,7 @@ log_audit_event(AuditEvent *e)
 		return;
 
 	timestamp = timestamptz_to_str(GetCurrentTimestamp());
+	database = get_database_name(MyDatabaseId);
 	username = GetUserNameFromId(GetSessionUserId());
 	eusername = GetUserNameFromId(GetUserId());
 
@@ -295,7 +297,7 @@ log_audit_event(AuditEvent *e)
 
 	ereport(LOG,
 			(errmsg("[AUDIT],%s,%s,%s,%s,%s,%s,%s,%s,%s",
-					timestamp, get_database_name(MyDatabaseId),
+					timestamp, database,
 					username, eusername, classname,
 					e->command_tag, e->object_type, e->object_id,
 					e->command_text)));
