@@ -303,173 +303,6 @@ log_audit_event(AuditEvent *e)
 }
 
 /*
- * A ddl_command_end event trigger to build AuditEvents for commands
- * that we can deparse. This function is called at the end of any DDL
- * command that has event trigger support.
- */
-
-Datum
-pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
-{
-	EventTriggerData *trigdata;
-	int               ret, row;
-	TupleDesc		  spi_tupdesc;
-	const char		 *query_get_creation_commands;
-
-	MemoryContext tmpcontext;
-	MemoryContext oldcontext;
-
-	if (pgaudit_log == 0)
-		PG_RETURN_NULL();
-
-	if (!CALLED_AS_EVENT_TRIGGER(fcinfo))
-		elog(ERROR, "not fired by event trigger manager");
-
-	/*
-	 * This query returns the objects affected by the DDL, and a JSON
-	 * representation of the parsed command. We use SPI to execute it,
-	 * and compose one AuditEvent per object in the results.
-	 */
-
-	query_get_creation_commands =
-		"SELECT classid, objid, objsubid, object_type, schema, identity, command"
-		"  FROM pg_event_trigger_get_creation_commands()";
-
-	tmpcontext = AllocSetContextCreate(CurrentMemoryContext,
-									   "pgaudit_func_ddl_command_end temporary context",
-									   ALLOCSET_DEFAULT_MINSIZE,
-									   ALLOCSET_DEFAULT_INITSIZE,
-									   ALLOCSET_DEFAULT_MAXSIZE);
-	oldcontext = MemoryContextSwitchTo(tmpcontext);
-
-	ret = SPI_connect();
-	if (ret < 0)
-		elog(ERROR, "pgaudit_func_ddl_command_end: SPI_connect returned %d", ret);
-
-	ret = SPI_execute(query_get_creation_commands, true, 0);
-	if (ret != SPI_OK_SELECT)
-		elog(ERROR, "pgaudit_func_ddl_command_end: SPI_execute returned %d", ret);
-
-	spi_tupdesc = SPI_tuptable->tupdesc;
-
-	trigdata = (EventTriggerData *) fcinfo->context;
-
-	for (row = 0; row < SPI_processed; row++)
-	{
-		AuditEvent e;
-		HeapTuple  spi_tuple;
-		Datum	   json;
-		Datum	   command;
-		bool	   isnull;
-		char	  *command_formatted;
-
-		spi_tuple = SPI_tuptable->vals[row];
-
-		/* Temporarily dump the raw JSON rendering for debugging */
-		command_formatted = SPI_getvalue(spi_tuple, spi_tupdesc, 7);
-		ereport(DEBUG1, (errmsg("%s", command_formatted),
-						 errhidestmt(true)));
-
-		/*
-		 * pg_event_trigger_expand_command() takes the JSON
-		 * representation of a command and deparses it back into a
-		 * fully-qualified version of the command.
-		 */
-
-		json = SPI_getbinval(spi_tuple, spi_tupdesc, 7, &isnull);
-		command = DirectFunctionCall1(pg_event_trigger_expand_command, json);
-
-		e.type = nodeTag(trigdata->parsetree);
-		e.object_id = SPI_getvalue(spi_tuple, spi_tupdesc, 6);
-		e.object_type = SPI_getvalue(spi_tuple, spi_tupdesc, 4);
-		e.command_tag = trigdata->tag;
-		e.command_text = TextDatumGetCString(command);
-
-		log_audit_event(&e);
-	}
-
-	SPI_finish();
-	MemoryContextSwitchTo(oldcontext);
-	MemoryContextDelete(tmpcontext);
-	PG_RETURN_NULL();
-}
-
-/*
- * An sql_drop event trigger to build AuditEvents for dropped objects.
- * At the moment, we do not have the ability to deparse these commands,
- * but once support for the is added upstream, it's easy to implement.
- */
-
-Datum
-pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
-{
-	EventTriggerData *trigdata;
-	TupleDesc		  spi_tupdesc;
-	int               ret, row;
-	const char		 *query_dropped_objects;
-
-	MemoryContext tmpcontext;
-	MemoryContext oldcontext;
-
-	if (pgaudit_log == 0)
-		PG_RETURN_NULL();
-
-	if (!CALLED_AS_EVENT_TRIGGER(fcinfo))
-		elog(ERROR, "not fired by event trigger manager");
-
-	/*
-	 * This query returns a list of objects dropped by the command
-	 * (which no longer exist, and thus cannot be looked up). With
-	 * no support for deparsing the command, the best we can do is
-	 * to log the identity of the objects.
-	 */
-
-	query_dropped_objects =
-		"SELECT classid, objid, objsubid, object_type, schema_name, object_name, object_identity"
-		"  FROM pg_event_trigger_dropped_objects()";
-
-	tmpcontext = AllocSetContextCreate(CurrentMemoryContext,
-									   "pgaudit_func_sql_drop temporary context",
-									   ALLOCSET_DEFAULT_MINSIZE,
-									   ALLOCSET_DEFAULT_INITSIZE,
-									   ALLOCSET_DEFAULT_MAXSIZE);
-	oldcontext = MemoryContextSwitchTo(tmpcontext);
-
-	ret = SPI_connect();
-	if (ret < 0)
-		elog(ERROR, "pgaudit_func_sql_drop: SPI_connect returned %d", ret);
-
-	ret = SPI_execute(query_dropped_objects, true, 0);
-	if (ret != SPI_OK_SELECT)
-		elog(ERROR, "pgaudit_func_sql_drop: SPI_execute returned %d", ret);
-
-	spi_tupdesc = SPI_tuptable->tupdesc;
-
-	trigdata = (EventTriggerData *) fcinfo->context;
-
-	for (row = 0; row < SPI_processed; row++)
-	{
-		AuditEvent e;
-		HeapTuple  spi_tuple;
-
-		spi_tuple = SPI_tuptable->vals[row];
-
-		e.type = nodeTag(trigdata->parsetree);
-		e.object_id = SPI_getvalue(spi_tuple, spi_tupdesc, 7);
-		e.object_type = SPI_getvalue(spi_tuple, spi_tupdesc, 4);
-		e.command_tag = trigdata->tag;
-		e.command_text = "";
-
-		log_audit_event(&e);
-	}
-
-	SPI_finish();
-	MemoryContextSwitchTo(oldcontext);
-	MemoryContextDelete(tmpcontext);
-	PG_RETURN_NULL();
-}
-
-/*
  * Create AuditEvents for DML operations via executor permissions
  * checks. We create an AuditEvent for each table in the list of
  * RangeTableEntries from the query.
@@ -749,6 +582,177 @@ log_object_access(ObjectAccessType access,
 	 * this hook to provide limited backwards-compability when event
 	 * triggers are not available.
 	 */
+}
+
+/*
+ * Event trigger functions
+ */
+
+/*
+ * A ddl_command_end event trigger to build AuditEvents for commands
+ * that we can deparse. This function is called at the end of any DDL
+ * command that has event trigger support.
+ */
+
+Datum
+pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
+{
+	EventTriggerData *trigdata;
+	int               ret, row;
+	TupleDesc		  spi_tupdesc;
+	const char		 *query_get_creation_commands;
+
+	MemoryContext tmpcontext;
+	MemoryContext oldcontext;
+
+	if (pgaudit_log == 0)
+		PG_RETURN_NULL();
+
+	if (!CALLED_AS_EVENT_TRIGGER(fcinfo))
+		elog(ERROR, "not fired by event trigger manager");
+
+	/*
+	 * This query returns the objects affected by the DDL, and a JSON
+	 * representation of the parsed command. We use SPI to execute it,
+	 * and compose one AuditEvent per object in the results.
+	 */
+
+	query_get_creation_commands =
+		"SELECT classid, objid, objsubid, object_type, schema, identity, command"
+		"  FROM pg_event_trigger_get_creation_commands()";
+
+	tmpcontext = AllocSetContextCreate(CurrentMemoryContext,
+									   "pgaudit_func_ddl_command_end temporary context",
+									   ALLOCSET_DEFAULT_MINSIZE,
+									   ALLOCSET_DEFAULT_INITSIZE,
+									   ALLOCSET_DEFAULT_MAXSIZE);
+	oldcontext = MemoryContextSwitchTo(tmpcontext);
+
+	ret = SPI_connect();
+	if (ret < 0)
+		elog(ERROR, "pgaudit_func_ddl_command_end: SPI_connect returned %d", ret);
+
+	ret = SPI_execute(query_get_creation_commands, true, 0);
+	if (ret != SPI_OK_SELECT)
+		elog(ERROR, "pgaudit_func_ddl_command_end: SPI_execute returned %d", ret);
+
+	spi_tupdesc = SPI_tuptable->tupdesc;
+
+	trigdata = (EventTriggerData *) fcinfo->context;
+
+	for (row = 0; row < SPI_processed; row++)
+	{
+		AuditEvent e;
+		HeapTuple  spi_tuple;
+		Datum	   json;
+		Datum	   command;
+		bool	   isnull;
+		char	  *command_formatted;
+
+		spi_tuple = SPI_tuptable->vals[row];
+
+		/* Temporarily dump the raw JSON rendering for debugging */
+		command_formatted = SPI_getvalue(spi_tuple, spi_tupdesc, 7);
+		ereport(DEBUG1, (errmsg("%s", command_formatted),
+						 errhidestmt(true)));
+
+		/*
+		 * pg_event_trigger_expand_command() takes the JSON
+		 * representation of a command and deparses it back into a
+		 * fully-qualified version of the command.
+		 */
+
+		json = SPI_getbinval(spi_tuple, spi_tupdesc, 7, &isnull);
+		command = DirectFunctionCall1(pg_event_trigger_expand_command, json);
+
+		e.type = nodeTag(trigdata->parsetree);
+		e.object_id = SPI_getvalue(spi_tuple, spi_tupdesc, 6);
+		e.object_type = SPI_getvalue(spi_tuple, spi_tupdesc, 4);
+		e.command_tag = trigdata->tag;
+		e.command_text = TextDatumGetCString(command);
+
+		log_audit_event(&e);
+	}
+
+	SPI_finish();
+	MemoryContextSwitchTo(oldcontext);
+	MemoryContextDelete(tmpcontext);
+	PG_RETURN_NULL();
+}
+
+/*
+ * An sql_drop event trigger to build AuditEvents for dropped objects.
+ * At the moment, we do not have the ability to deparse these commands,
+ * but once support for the is added upstream, it's easy to implement.
+ */
+
+Datum
+pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
+{
+	EventTriggerData *trigdata;
+	TupleDesc		  spi_tupdesc;
+	int               ret, row;
+	const char		 *query_dropped_objects;
+
+	MemoryContext tmpcontext;
+	MemoryContext oldcontext;
+
+	if (pgaudit_log == 0)
+		PG_RETURN_NULL();
+
+	if (!CALLED_AS_EVENT_TRIGGER(fcinfo))
+		elog(ERROR, "not fired by event trigger manager");
+
+	/*
+	 * This query returns a list of objects dropped by the command
+	 * (which no longer exist, and thus cannot be looked up). With
+	 * no support for deparsing the command, the best we can do is
+	 * to log the identity of the objects.
+	 */
+
+	query_dropped_objects =
+		"SELECT classid, objid, objsubid, object_type, schema_name, object_name, object_identity"
+		"  FROM pg_event_trigger_dropped_objects()";
+
+	tmpcontext = AllocSetContextCreate(CurrentMemoryContext,
+									   "pgaudit_func_sql_drop temporary context",
+									   ALLOCSET_DEFAULT_MINSIZE,
+									   ALLOCSET_DEFAULT_INITSIZE,
+									   ALLOCSET_DEFAULT_MAXSIZE);
+	oldcontext = MemoryContextSwitchTo(tmpcontext);
+
+	ret = SPI_connect();
+	if (ret < 0)
+		elog(ERROR, "pgaudit_func_sql_drop: SPI_connect returned %d", ret);
+
+	ret = SPI_execute(query_dropped_objects, true, 0);
+	if (ret != SPI_OK_SELECT)
+		elog(ERROR, "pgaudit_func_sql_drop: SPI_execute returned %d", ret);
+
+	spi_tupdesc = SPI_tuptable->tupdesc;
+
+	trigdata = (EventTriggerData *) fcinfo->context;
+
+	for (row = 0; row < SPI_processed; row++)
+	{
+		AuditEvent e;
+		HeapTuple  spi_tuple;
+
+		spi_tuple = SPI_tuptable->vals[row];
+
+		e.type = nodeTag(trigdata->parsetree);
+		e.object_id = SPI_getvalue(spi_tuple, spi_tupdesc, 7);
+		e.object_type = SPI_getvalue(spi_tuple, spi_tupdesc, 4);
+		e.command_tag = trigdata->tag;
+		e.command_text = "";
+
+		log_audit_event(&e);
+	}
+
+	SPI_finish();
+	MemoryContextSwitchTo(oldcontext);
+	MemoryContextDelete(tmpcontext);
+	PG_RETURN_NULL();
 }
 
 /*
