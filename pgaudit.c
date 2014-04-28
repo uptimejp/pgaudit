@@ -40,8 +40,15 @@
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
-#include "utils/ruleutils.h"
 #include "utils/timestamp.h"
+
+/*
+ * This function is in utils/builtins.h in 9.3.x, and in
+ * utils/ruleutils.h in the deparse branch. We declare it
+ * ourselves to make our life simpler.
+ */
+
+extern char *quote_qualified_identifier(const char *qualifier, const char *ident);
 
 PG_MODULE_MAGIC;
 
