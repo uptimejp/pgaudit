@@ -434,7 +434,10 @@ log_executor_check_perms(List *rangeTabls, bool abort_on_violation)
 		e.object_id = relname;
 		e.object_type = reltype;
 		e.command_tag = tag;
-		e.command_text = "";
+		if (debug_query_string)
+			e.command_text = debug_query_string;
+		else
+			e.command_text = "";
 
 		log_audit_event(&e);
 
@@ -696,7 +699,10 @@ log_object_access(ObjectAccessType access,
 				e.object_id = name;
 				e.object_type = "FUNCTION";
 				e.command_tag = "EXECUTE";
-				e.command_text = "";
+				if (debug_query_string)
+					e.command_text = debug_query_string;
+				else
+					e.command_text = "";
 			}
 			break;
 
