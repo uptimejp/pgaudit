@@ -1,43 +1,31 @@
-What we could do
-================
+What pgaudit does
+=================
 
-Event sources
+1. Uses an ExecutorCheckPerms_hook to log DML commands.
 
-  For DDL and other non-DML:
+2. Uses event triggers to support some DDL commands, depending on the
+   server version and the availability of ddl_command_end triggers with
+   pg_event_trigger_get_creation_commands().
 
-    - A ClientAuthentication_hook can record login events.
+3. Uses a ProcessUtility_hook to log DDL and utility commands that are
+   not supported by event triggers or the object_access_hook.
 
-    - For (some, but not all) CREATE/ALTER/DROP statements: event
-    triggers. We could use an object_access_hook, but there seems to be
-    little point, we'd be reinventing what event triggers already do.
+4. Uses an object_access_hook to log function execution and, if event
+   triggers are not available, also CREATE/ALTER commands.
 
-    - For function execution (and "namespace search", but that is
-    probably not interesting), we can use an object_access_hook.
+5. Logs to the server log file with ereport().
 
-    - For other utility commands, a ProcessUtility_hook. Whatever can be
-    handled by event triggers should be, though, because we don't want
-    to reinvent code at every turn to examine a parse tree. But we can't
-    avoid it altogether because we need to log e.g. GRANT/REVOKE.
+What else pgaudit could do
+==========================
 
-  For DML:
+1. Support logging to a separate log file and to a table.
 
-    - An ExecutorCheckPerms_hook can give relation-level and
-    column-level information about SELECT/INSERT/UPDATE/DELETE, via a
-    List of RangeTblEntry *s and rte->requiredPerms. No access to the
-    statement or to the changed data, however.
+2. Use a ClientAuthentication_hook to record login events.
 
-    - A logical decoding output plugin can give row-level information
-    about INSERT/UPDATE/DELETE, but nothing for SELECT.
+3. Decode and log read/written column names in DML commands.
 
-Event sinks
+4. Use a logical decoding output plugin to also record column
+   values in DML commands.
 
-    - For now, only ereport()
-    - Later, log to a different file and to a table.
-    - contrib/sepgsql emits audit events to the postgres logfile.
-
-What we're doing
-================
-
-1. We'll use event triggers for those events they support
-2. We'll use a ProcessUtility_hook to log other DDL.
-3. We'll use an ExecutorCheckPerms_hook to log SELECT/DML.
+5. Use extensible reloptions (or a similar mechanism) to allow
+   per-object auditing configuration.

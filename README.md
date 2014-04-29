@@ -11,7 +11,7 @@ available).
 All DDL, DML (including SELECT), and utility commands are supported.
 These are categorised as described below, and audit logging for each
 group of commands may be enabled or disabled by the superuser. Once
-enabled, however, audit logging may not be disabled.
+enabled, however, audit logging may not be disabled by a user.
 
 What about log_statement = 'all'?
 ---------------------------------
@@ -38,10 +38,6 @@ is also straightforward.
 With log_statement, one may select none, ddl, mod, or all. With pgaudit,
 individual groups of commands may be selected for logging. Want to log
 only GRANT/REVOKE operations? You can.
-
-On the other hand, pgaudit does not currently log the names or values of
-columns read or written by a query, nor does it have access to the query
-text. (But see "Future improvements" below.)
 
 Installation
 ------------
@@ -112,16 +108,16 @@ We log audit events in CSV format with the following fields:
 		<class>,<tag>,<object type>,<object id>,
 		<command text>
 
-<class> is the name of a logging class (READ, WRITE, etc.)
+*class* is the name of a logging class (READ, WRITE, etc.)
 
-<tag> is the command tag (e.g. SELECT)
+*tag* is the command tag (e.g. SELECT)
 
-<object type> is the type of object affected, if any (e.g. TABLE)
+*object type* is the type of object affected, if any (e.g. TABLE)
 
-<object id> is some way to identify the affected object, usually a
+*object id* is some way to identify the affected object, usually a
 fully-qualified name
 
-<command text> is the full text of the command.
+*command text* is the full text of the command.
 
 Note that not all fields are always available.
 
@@ -134,7 +130,6 @@ LOG:  [AUDIT],2014-04-28 12:27:14.26793+09,auditdb,dbusr,dbusr,DEFINITION,ALTER 
 LOG:  [AUDIT],2014-04-28 12:28:37.035584+09,auditdb,dbusr,dbusr,WRITE,UPDATE,TABLE,public.x,
 LOG:  [AUDIT],2014-04-28 12:28:48.378428+09,auditdb,dbusr,dbusr,ADMIN,VACUUM,,,VACUUM x ;
 
-
 Design overview
 ---------------
 
@@ -144,7 +139,7 @@ unambiguous deparsed command representation.) Other DDL and utility
 commands are collected by a utility hook, and DML and SELECT events
 are collected by an executor hook.
 
-See DESIGN for more details.
+See DESIGN for more details and future improvements.
 
 Known problems
 --------------
@@ -163,25 +158,6 @@ Deparsed query text is only available for CREATE, not DROP.
 Some bugs of varying severity in the deparse code have been reported
 upstream. Some have been fixed already, but the code is under active
 development, and other bugs still await fixes.
-
-Future improvements
--------------------
-
-The only audit log target currently available is the server logfile. We
-plan to support other log targets in future.
-
-It is possible to display the list of column names read or written by a
-query in the executor hook.
-
-At the moment, the code depends on the latest unreleased event triggers
-code. It may be possible to provide a subset of the auditing features
-without using event triggers.
-
-It is possible to get column values for DML statements using a logical
-decoding output plugin. With row-level security, it may even be possible
-to record query results seen by a particular user.
-
-We also hope to allow per-object auditing configuration someday.
 
 Bug reports and other feedback are welcome.
 
