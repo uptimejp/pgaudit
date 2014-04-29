@@ -589,6 +589,8 @@ log_object_access(ObjectAccessType access,
 Datum
 pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 {
+#if PG_VERSION_NUM >= 90500
+
 	EventTriggerData *trigdata;
 	int               ret, row;
 	TupleDesc		  spi_tupdesc;
@@ -669,6 +671,9 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 	SPI_finish();
 	MemoryContextSwitchTo(oldcontext);
 	MemoryContextDelete(tmpcontext);
+
+#endif
+
 	PG_RETURN_NULL();
 }
 
