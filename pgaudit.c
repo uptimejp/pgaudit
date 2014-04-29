@@ -443,8 +443,18 @@ log_executor_check_perms(List *rangeTabls, bool abort_on_violation)
 }
 
 /*
- * Create AuditEvents for utility commands that cannot be handled by
+ * Create AuditEvents for utility commands that are not supported by
  * event triggers, particularly those which affect global objects.
+ *
+ * Exactly what commands are supported by event triggers depends on the
+ * version of Postgres in use. In versions 9.3 and 9.4, we can use only
+ * the sql_drop event trigger, because our ddl_command_end trigger needs
+ * pg_event_trigger_{get_creation_commands,expand_command}. Therefore we
+ * must handle all DDL commands other than DROP here.
+ *
+ * In 9.5 (as represented by the latest deparse branch), we can use the
+ * ddl_command_end trigger, which handles CREATE/ALTER for a variety of
+ * objects. Therefore we can skip those cases.
  */
 
 static void
@@ -509,12 +519,66 @@ log_utility_command(Node *parsetree,
 		case T_AlterTableSpaceMoveStmt:
 		case T_AlterSystemStmt:
 #endif
+
+		/*
+		 * The following statements are supported only by the
+		 * ddl_command_end event trigger. (This list is from
+		 * ProcessUtilitySlow.)
+		 */
+
+#ifndef USE_DEPARSE_FUNCTIONS
+		case T_CreateSchemaStmt:
+		case T_CreateStmt:
+		case T_CreateForeignTableStmt:
+		case T_AlterTableStmt:
+		case T_AlterDomainStmt:
+		case T_DefineStmt:
+		case T_IndexStmt:
+		case T_CreateExtensionStmt:
+		case T_AlterExtensionStmt:
+		case T_AlterExtensionContentsStmt:
+		case T_CreateFdwStmt:
+		case T_AlterFdwStmt:
+		case T_CreateForeignServerStmt:
+		case T_AlterForeignServerStmt:
+		case T_CreateUserMappingStmt:
+		case T_AlterUserMappingStmt:
+		case T_DropUserMappingStmt:
+		case T_CompositeTypeStmt:
+		case T_CreateEnumStmt:
+		case T_CreateRangeStmt:
+		case T_AlterEnumStmt:
+		case T_ViewStmt:
+		case T_CreateFunctionStmt:
+		case T_AlterFunctionStmt:
+		case T_RuleStmt:
+		case T_CreateSeqStmt:
+		case T_AlterSeqStmt:
+		case T_CreateTableAsStmt:
+		case T_RefreshMatViewStmt:
+		case T_CreateTrigStmt:
+		case T_CreatePLangStmt:
+		case T_CreateDomainStmt:
+		case T_CreateConversionStmt:
+		case T_CreateCastStmt:
+		case T_CreateOpClassStmt:
+		case T_CreateOpFamilyStmt:
+		case T_AlterOpFamilyStmt:
+		case T_AlterTSDictionaryStmt:
+		case T_AlterTSConfigurationStmt:
+		case T_RenameStmt:
+		case T_AlterObjectSchemaStmt:
+		case T_AlterOwnerStmt:
+		case T_DropOwnedStmt:
+		case T_AlterDefaultPrivilegesStmt:
+#endif
 			supported_stmt = false;
 			break;
 
 		/*
 		 * The following statements are supported by event triggers for
-		 * certain object types.
+		 * certain object types. We can always use DROP support, but the
+		 * others are dependent on the ddl_command_end trigger.
 		 */
 
 		case T_DropStmt:
@@ -526,6 +590,7 @@ log_utility_command(Node *parsetree,
 			}
 			break;
 
+#ifdef USE_DEPARSE_FUNCTIONS
 		case T_RenameStmt:
 			{
 				RenameStmt *stmt = (RenameStmt *) parsetree;
@@ -552,6 +617,7 @@ log_utility_command(Node *parsetree,
 					supported_stmt = false;
 			}
 			break;
+#endif
 
 		/*
 		 * All other statement types have event trigger support, or we
