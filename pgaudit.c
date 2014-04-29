@@ -223,7 +223,6 @@ should_be_logged(AuditEvent *e, const char **classname)
 		case T_AlterUserMappingStmt:
 		case T_DropUserMappingStmt:
 		case T_AlterTableSpaceOptionsStmt:
-		case T_AlterTableSpaceMoveStmt:
 		case T_SecLabelStmt:
 		case T_CreateForeignTableStmt:
 		case T_CreateExtensionStmt:
@@ -232,7 +231,10 @@ should_be_logged(AuditEvent *e, const char **classname)
 		case T_CreateEventTrigStmt:
 		case T_AlterEventTrigStmt:
 		case T_RefreshMatViewStmt:
+#if PG_VERSION_NUM >= 90400
+		case T_AlterTableSpaceMoveStmt:
 		case T_AlterSystemStmt:
+#endif
 			name = "ADMIN";
 			class = LOG_ADMIN;
 			break;
@@ -460,7 +462,6 @@ log_utility_command(Node *parsetree,
 		case T_CreateTableSpaceStmt:
 		case T_DropTableSpaceStmt:
 		case T_AlterTableSpaceOptionsStmt:
-		case T_AlterTableSpaceMoveStmt:
 		case T_TruncateStmt:
 		case T_CommentStmt:
 		case T_SecLabelStmt:
@@ -474,7 +475,6 @@ log_utility_command(Node *parsetree,
 		case T_ClusterStmt:
 		case T_VacuumStmt:
 		case T_ExplainStmt:
-		case T_AlterSystemStmt:
 		case T_VariableSetStmt:
 		case T_DiscardStmt:
 		case T_CreateEventTrigStmt:
@@ -487,6 +487,10 @@ log_utility_command(Node *parsetree,
 		case T_LockStmt:
 		case T_CheckPointStmt:
 		case T_ReindexStmt:
+#if PG_VERSION_NUM >= 90400
+		case T_AlterTableSpaceMoveStmt:
+		case T_AlterSystemStmt:
+#endif
 			supported_stmt = false;
 			break;
 
