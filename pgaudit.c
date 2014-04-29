@@ -341,7 +341,13 @@ log_executor_check_perms(List *rangeTabls, bool abort_on_violation)
 		if (rte->rtekind != RTE_RELATION)
 			continue;
 
-		/* Get the fully-qualified name of the relation. */
+		/*
+		 * Get the fully-qualified name of the relation.
+		 *
+		 * User queries against catalog tables (e.g. "\dt") are logged
+		 * here. Should we filter them out, as we do for functions in
+		 * pg_catalog?
+		 */
 
 		rel = relation_open(rte->relid, NoLock);
 		relname = quote_qualified_identifier(get_namespace_name(RelationGetNamespace(rel)),
