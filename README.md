@@ -18,26 +18,26 @@ What about log_statement = 'all'?
 
 1. pgaudit logs fully-qualified names
 
-A query like «delete from x» in the log file can be interpreted only
-with reference to the current search_path setting. In contrast, this
-module always logs fully-qualified object names, e.g. "public.x".
+	A query like «delete from x» in the log file can be interpreted only
+	with reference to the current search_path setting. In contrast, this
+	module always logs fully-qualified object names, e.g. "public.x".
 
-For DDL commands that have appropriate event trigger support, we log an
-unambigous representation of the command text, not just the query string
-as supplied by the user.
+	For DDL commands that have appropriate event trigger support, we log
+	an unambigous representation of the command text, not just the query
+	string as supplied by the user.
 
 2. pgaudit creates a log entry for each affected object
 
-A query that refers to multiple objects results in a log entry for each
-object involved, so the effects of «select * from some_view» can be seen
-rather than inferred. Searching for all accesses to a particular table
-is also straightforward.
+	A query that refers to multiple objects results in a log entry for
+	each object involved, so the effects of «select * from some_view»
+	can be seen rather than inferred. Searching for all accesses to a
+	particular table is also straightforward.
 
 3. pgaudit provides finer-grained control over what events are logged
 
-With log_statement, one may select none, ddl, mod, or all. With pgaudit,
-individual groups of commands may be selected for logging. Want to log
-only GRANT/REVOKE operations? You can.
+	With log_statement, one may select none, ddl, mod, or all. With
+	pgaudit, individual groups of commands may be selected for logging.
+	Want to log only GRANT/REVOKE operations? You can.
 
 Installation
 ------------
@@ -163,7 +163,9 @@ Bug reports and other feedback are welcome.
 
 Authors
 -------
+
 Ian Barwick <ian@2ndQuadrant.com>
+
 Abhijit Menon-Sen <ams@2ndQuadrant.com>
 
 The research leading to these results has received funding from the
