@@ -584,6 +584,16 @@ log_object_access(ObjectAccessType access,
 
 	switch (access)
 	{
+		case OAT_POST_CREATE:
+		case OAT_POST_ALTER:
+			/*
+			 * The event triggers defined above cover these cases, so we
+			 * ignore them. In theory we could provide limited backwards
+			 * compatibility here if event triggers aren't available.
+			 */
+			return;
+			break;
+
 		case OAT_FUNCTION_EXECUTE:
 			{
 				HeapTuple proctup;
@@ -619,17 +629,9 @@ log_object_access(ObjectAccessType access,
 			break;
 
 		default:
+		case OAT_DROP:
 		case OAT_NAMESPACE_SEARCH:
 			/* Not relevant to our purposes. */
-
-		case OAT_POST_CREATE:
-		case OAT_POST_ALTER:
-		case OAT_DROP:
-			/*
-			 * The event triggers defined above cover these cases, so we
-			 * ignore them. In theory we could provide limited backwards
-			 * compatibility here if event triggers aren't available.
-			 */
 			return;
 			break;
 	}
