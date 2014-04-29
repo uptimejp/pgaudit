@@ -88,6 +88,7 @@ or to any combination of the following logging classes:
 	DEFINITION	DDL: CREATE/DROP/ALTER for tables, etc.
 	CONFIG		CREATE OPERATOR, etc.
 	ADMIN		VACUUM, REINDEX, ANALYSE, …
+	FUNCTION	Non-catalog function execution
 
 pgaudit.log may be set in postgresql.conf (to apply globally), or as a
 per-database or per-user setting:
@@ -143,9 +144,6 @@ See DESIGN for more details.
 
 Known problems
 --------------
-
-We can log function execution using the object_access_hook, but it's
-very noisy and could do with some filtering of catalog functions.
 
 Statements are audit-logged even if the transaction they're in is later
 rolled back. This is sometimes desirable (e.g. with SELECT), but makes

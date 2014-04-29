@@ -26,6 +26,7 @@
 
 #include "access/htup_details.h"
 #include "access/xact.h"
+#include "catalog/catalog.h"
 #include "catalog/objectaccess.h"
 #include "commands/dbcommands.h"
 #include "catalog/pg_proc.h"
@@ -88,6 +89,9 @@ enum LogClass {
 
 	/* VACUUM, REINDEX, ANALYZE */
 	LOG_ADMIN = (1 << 6),
+
+	/* Function execution */
+	LOG_FUNCTION = (1 << 7),
 
 	/* Absolutely everything; not available via pgaudit.log */
 	LOG_ALL = ~(uint64)0
@@ -240,6 +244,11 @@ should_be_logged(AuditEvent *e, const char **classname)
 #endif
 			name = "ADMIN";
 			class = LOG_ADMIN;
+			break;
+
+		case T_ExecuteStmt:
+			name = "FUNCTION";
+			class = LOG_FUNCTION;
 			break;
 
 			/*
@@ -585,16 +594,27 @@ log_object_access(ObjectAccessType access,
 				if (!proctup)
 					elog(ERROR, "cache lookup failed for function %u", objectId);
 				proc = (Form_pg_proc) GETSTRUCT(proctup);
+
+				/*
+				 * Logging execution of all pg_catalog functions would
+				 * make the log unusably noisy.
+				 */
+
+				if (IsSystemNamespace(proc->pronamespace))
+				{
+					ReleaseSysCache(proctup);
+					return;
+				}
+
 				name = quote_qualified_identifier(get_namespace_name(proc->pronamespace),
 												  NameStr(proc->proname));
+				ReleaseSysCache(proctup);
 
 				e.type = T_ExecuteStmt;
 				e.object_id = name;
 				e.object_type = "FUNCTION";
 				e.command_tag = "EXECUTE";
 				e.command_text = "";
-
-				ReleaseSysCache(proctup);
 			}
 			break;
 
