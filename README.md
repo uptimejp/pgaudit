@@ -146,7 +146,6 @@ Known problems
 
 We can log function execution using the object_access_hook, but it's
 very noisy and could do with some filtering of catalog functions.
-(See the "function-execution" branch in the repository.)
 
 Statements are audit-logged even if the transaction they're in is later
 rolled back. This is sometimes desirable (e.g. with SELECT), but makes
