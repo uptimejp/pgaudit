@@ -658,7 +658,7 @@ log_object_access(ObjectAccessType access,
 Datum
 pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 {
-#if PG_VERSION_NUM >= 90500
+#ifdef USE_DEPARSE_FUNCTIONS
 
 	EventTriggerData *trigdata;
 	int               ret, row;

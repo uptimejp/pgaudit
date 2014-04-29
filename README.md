@@ -46,22 +46,26 @@ text. (But see "Future improvements" below.)
 Installation
 ------------
 
-(Note: for the moment, using pgaudit means building your own Postgres.
-If you are not already comfortable with this procedure, this extension
-is not yet ready for your use. We apologise for the inconvenience.)
-
 The latest pgaudit code is available at
 https://github.com/2ndQuadrant/pgaudit
 
-It depends on the latest unreleased event trigger code available in the
-deparse branch of git://git.postgresql.org/git/2ndquadrant_bdr.git
+This module will work with Postgres 9.3 and 9.4 (not yet released at the
+time of writing), but it needs updated event trigger code in order to
+log a complete, unambiguous representation of DDL commands.
 
-The easiest way to install pgaudit is to copy it into contrib/pgaudit in
-the checked-out deparse source tree. Build Postgres as usual, then:
+We hope that the necessary event trigger code will be available in 9.5,
+but until then you will have to build your own Postgres to see pgaudit
+at its best. The necessary code is available in the deparse branch of
+git://git.postgresql.org/git/2ndquadrant_bdr.git
 
-	cd contrib/pgaudit && make install
+First, build and install Postgres as usual from the deparse branch. Copy
+pgaudit into contrib/pgaudit and edit the Makefile to uncomment the line
+that defines "USE_DEPARSE_FUNCTIONS". Then run "make install".
 
-Edit postgresql.conf and set:
+If you want to use it against an earlier version of Postgres, just run
+"make install" in the pgaudit directory.
+
+Once the module is installed, edit postgresql.conf and set:
 
 	shared_preload_libraries = 'pgaudit'
 
