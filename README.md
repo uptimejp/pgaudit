@@ -63,7 +63,7 @@ pgaudit into contrib/pgaudit and edit the Makefile to uncomment the line
 that defines "USE_DEPARSE_FUNCTIONS". Then run "make install".
 
 If you want to use it against an earlier version of Postgres, just run
-"make install" in the pgaudit directory.
+"make USE_PGXS=1 install" in the pgaudit directory.
 
 Once the module is installed, edit postgresql.conf and set:
 
