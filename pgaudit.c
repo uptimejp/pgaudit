@@ -712,7 +712,7 @@ log_create_or_alter(bool create,
 					case RELKIND_MATVIEW:
 						objtype = "MATERIALIZED VIEW";
 						/* Pretend that materialized views are a kind of table  */
-						type = create ? T_CreateStmt : T_AlterTableStmt
+						type = create ? T_CreateStmt : T_AlterTableStmt;
 						tag = create ? "CREATE MATERIALIZED VIEW" : "ALTER MATERIALIZED VIEW";
 						break;
 
