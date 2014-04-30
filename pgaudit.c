@@ -717,8 +717,8 @@ log_create_or_alter(bool create,
 						break;
 
 					/*
-					 * We should handle the other RELKIND_xxx constants
-					 * here.
+					 * XXX Are there any other RELKIND_xxx cases that we
+					 * need to handle here?
 					 */
 
 					default:
@@ -733,8 +733,9 @@ log_create_or_alter(bool create,
 			break;
 
 		/*
-		 * We leave the remaining classIds to be handled by the
-		 * ProcessUtility_hook.
+		 * We leave it to the ProcessUtility_hook to handle all other
+		 * commands. There's not much we can do to improve on "create
+		 * database foo", for example.
 		 */
 
 		default:
