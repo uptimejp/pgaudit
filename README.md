@@ -123,12 +123,22 @@ Note that not all fields are always available.
 
 Here are some examples of log output:
 
-LOG:  [AUDIT],2014-04-28 12:21:01.15293+09,auditdb,dbusr,dbusr,DEFINITION,CREATE TABLE,table,public.x,CREATE  TABLE  public.x (a pg_catalog.int4   , b pg_catalog.text   COLLATE pg_catalog."default")   WITH (oids=OFF)
-LOG:  [AUDIT],2014-04-28 12:26:11.82442+09,auditdb,dbusr,dbusr,WRITE,INSERT,TABLE,public.x,
-LOG:  [AUDIT],2014-04-28 12:26:49.157767+09,auditdb,dbusr,dbusr,READ,SELECT,TABLE,public.x,
-LOG:  [AUDIT],2014-04-28 12:27:14.26793+09,auditdb,dbusr,dbusr,DEFINITION,ALTER TABLE,table,public.x,ALTER TABLE public.x ADD COLUMN c pg_catalog.date
-LOG:  [AUDIT],2014-04-28 12:28:37.035584+09,auditdb,dbusr,dbusr,WRITE,UPDATE,TABLE,public.x,
-LOG:  [AUDIT],2014-04-28 12:28:48.378428+09,auditdb,dbusr,dbusr,ADMIN,VACUUM,,,VACUUM x ;
+LOG:  [AUDIT],2014-04-30 17:13:55.202854+09,auditdb,dbuser,dbuser,DEFINITION,CREATE TABLE,TABLE,public.x,CREATE  TABLE  public.x (a pg_catalog.int4   , b pg_catalog.int4   )   WITH (oids=OFF)
+LOG:  [AUDIT],2014-04-30 17:14:06.548923+09,auditdb,dbuser,dbuser,WRITE,INSERT,TABLE,public.x,INSERT INTO x VALUES(1,1);
+LOG:  [AUDIT],2014-04-30 17:14:21.221879+09,auditdb,dbuser,dbuser,READ,SELECT,TABLE,public.x,SELECT * FROM x;
+LOG:  [AUDIT],2014-04-30 17:15:25.620213+09,auditdb,dbuser,dbuser,READ,SELECT,VIEW,public.v_x,SELECT * from v_x;
+LOG:  [AUDIT],2014-04-30 17:15:25.620262+09,auditdb,dbuser,dbuser,READ,SELECT,TABLE,public.x,SELECT * from v_x;
+LOG:  [AUDIT],2014-04-30 17:16:00.849868+09,auditdb,dbuser,dbuser,WRITE,UPDATE,TABLE,public.x,UPDATE x SET a=a+1;
+LOG:  [AUDIT],2014-04-30 17:16:18.291452+09,auditdb,dbuser,dbuser,ADMIN,VACUUM,,,VACUUM x;
+LOG:  [AUDIT],2014-04-30 17:18:01.08291+09,auditdb,dbuser,dbuser,DEFINITION,CREATE FUNCTION,FUNCTION,public.func_x(),CREATE  FUNCTION public.func_x() RETURNS  pg_catalog.int4 LANGUAGE sql  VOLATILE  CALLED ON NULL INPUT SECURITY INVOKER COST 100.000000   AS $dprs_$SELECT a FROM x LIMIT 1;$dprs_$
+LOG:  [AUDIT],2014-04-30 17:18:09.694755+09,auditdb,dbuser,dbuser,FUNCTION,EXECUTE,FUNCTION,public.func_x,SELECT * FROM func_x();
+LOG:  [AUDIT],2014-04-30 17:18:09.694865+09,auditdb,dbuser,dbuser,READ,SELECT,TABLE,public.x,SELECT * FROM func_x();
+CONTEXT:  SQL function "func_x" statement 1
+LOG:  [AUDIT],2014-04-30 17:18:33.703007+09,auditdb,dbuser,dbuser,WRITE,DELETE,VIEW,public.v_x,DELETE FROM v_x;
+LOG:  [AUDIT],2014-04-30 17:18:33.703051+09,auditdb,dbuser,dbuser,WRITE,DELETE,TABLE,public.x,DELETE FROM v_x;
+LOG:  [AUDIT],2014-04-30 17:19:54.811244+09,auditdb,dbuser,dbuser,ADMIN,SET,,,set role foo;
+LOG:  [AUDIT],2014-04-30 17:19:57.039979+09,auditdb,dbuser,otherusr,WRITE,INSERT,VIEW,public.v_x,INSERT INTO v_x VALUES(1,2);
+LOG:  [AUDIT],2014-04-30 17:19:57.040014+09,auditdb,dbuser,otherusr,WRITE,INSERT,TABLE,public.x,INSERT INTO v_x VALUES(1,2);
 
 Design overview
 ---------------
