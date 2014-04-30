@@ -893,7 +893,8 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 	 */
 
 	query_get_creation_commands =
-		"SELECT classid, objid, objsubid, object_type, schema, identity, command"
+		"SELECT classid, objid, objsubid, UPPER(object_type), schema,"
+		" identity, command"
 		"  FROM pg_event_trigger_get_creation_commands()";
 
 	tmpcontext = AllocSetContextCreate(CurrentMemoryContext,
@@ -989,7 +990,8 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 	 */
 
 	query_dropped_objects =
-		"SELECT classid, objid, objsubid, object_type, schema_name, object_name, object_identity"
+		"SELECT classid, objid, objsubid, UPPER(object_type), schema_name, "
+		" object_name, object_identity"
 		"  FROM pg_event_trigger_dropped_objects()";
 
 	tmpcontext = AllocSetContextCreate(CurrentMemoryContext,
