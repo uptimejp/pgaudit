@@ -189,6 +189,9 @@ should_be_logged(AuditEvent *e, const char **classname)
 		case T_CreateEnumStmt:
 		case T_CreateRangeStmt:
 		case T_AlterEnumStmt:
+		case T_RefreshMatViewStmt:
+		case T_CreateForeignTableStmt:
+		case T_CompositeTypeStmt:
 			name = "DEFINITION";
 			class = LOG_DEFINITION;
 			break;
@@ -199,7 +202,6 @@ should_be_logged(AuditEvent *e, const char **classname)
 		case T_CreateOpClassStmt:
 		case T_CreateOpFamilyStmt:
 		case T_AlterOpFamilyStmt:
-		case T_CompositeTypeStmt:
 		case T_AlterTSDictionaryStmt:
 		case T_AlterTSConfigurationStmt:
 			name = "CONFIG";
@@ -232,13 +234,11 @@ should_be_logged(AuditEvent *e, const char **classname)
 		case T_DropUserMappingStmt:
 		case T_AlterTableSpaceOptionsStmt:
 		case T_SecLabelStmt:
-		case T_CreateForeignTableStmt:
 		case T_CreateExtensionStmt:
 		case T_AlterExtensionStmt:
 		case T_AlterExtensionContentsStmt:
 		case T_CreateEventTrigStmt:
 		case T_AlterEventTrigStmt:
-		case T_RefreshMatViewStmt:
 #if PG_VERSION_NUM >= 90400
 		case T_AlterTableSpaceMoveStmt:
 		case T_AlterSystemStmt:
@@ -530,14 +530,11 @@ log_utility_command(Node *parsetree,
 		 * ProcessUtilitySlow.)
 		 */
 
+
 #ifndef USE_DEPARSE_FUNCTIONS
 		case T_CreateSchemaStmt:
-		case T_CreateStmt:
-		case T_CreateForeignTableStmt:
-		case T_AlterTableStmt:
 		case T_AlterDomainStmt:
 		case T_DefineStmt:
-		case T_IndexStmt:
 		case T_CreateExtensionStmt:
 		case T_AlterExtensionStmt:
 		case T_AlterExtensionContentsStmt:
@@ -548,18 +545,12 @@ log_utility_command(Node *parsetree,
 		case T_CreateUserMappingStmt:
 		case T_AlterUserMappingStmt:
 		case T_DropUserMappingStmt:
-		case T_CompositeTypeStmt:
 		case T_CreateEnumStmt:
 		case T_CreateRangeStmt:
 		case T_AlterEnumStmt:
-		case T_ViewStmt:
 		case T_CreateFunctionStmt:
 		case T_AlterFunctionStmt:
 		case T_RuleStmt:
-		case T_CreateSeqStmt:
-		case T_AlterSeqStmt:
-		case T_CreateTableAsStmt:
-		case T_RefreshMatViewStmt:
 		case T_CreateTrigStmt:
 		case T_CreatePLangStmt:
 		case T_CreateDomainStmt:
@@ -685,10 +676,44 @@ log_create_or_alter(bool create,
 						tag = create ? "CREATE TABLE" : "ALTER TABLE";
 						break;
 
+					case RELKIND_INDEX:
+						objtype = "INDEX";
+						type = T_IndexStmt;
+						tag = create ? "CREATE INDEX" : "ALTER INDEX";
+						break;
+
 					case RELKIND_SEQUENCE:
 						objtype = "SEQUENCE";
 						type = create ? T_CreateStmt : T_AlterSeqStmt;
 						tag = create ? "CREATE SEQUENCE" : "ALTER SEQUENCE";
+						break;
+
+					case RELKIND_VIEW:
+						objtype = "VIEW";
+						/* T_ViewStmt covers both CREATE and ALTER */
+						type = T_ViewStmt;
+						tag = create ? "CREATE VIEW" : "ALTER VIEW";
+						break;
+
+					case RELKIND_COMPOSITE_TYPE:
+						objtype = "TYPE";
+						/* T_CompositeTypeStmt covers both CREATE and ALTER */
+						type = T_CompositeTypeStmt;
+						tag = create ? "CREATE TYPE" : "ALTER TYPE";
+						break;
+
+					case RELKIND_FOREIGN_TABLE:
+						objtype = "FOREIGN TABLE";
+						/* There is no T_AlterForeignTableStmt */
+						type = T_CreateForeignTableStmt;
+						tag = create ? "CREATE FOREIGN TABLE" : "ALTER FOREIGN TABLE";
+						break;
+
+					case RELKIND_MATVIEW:
+						objtype = "MATERIALIZED VIEW";
+						/* Pretend that materialized views are a kind of table  */
+						type = create ? T_CreateStmt : T_AlterTableStmt
+						tag = create ? "CREATE MATERIALIZED VIEW" : "ALTER MATERIALIZED VIEW";
 						break;
 
 					/*
