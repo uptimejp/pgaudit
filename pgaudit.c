@@ -530,7 +530,6 @@ log_utility_command(Node *parsetree,
 		 * ProcessUtilitySlow.)
 		 */
 
-
 #ifndef USE_DEPARSE_FUNCTIONS
 		case T_CreateSchemaStmt:
 		case T_AlterDomainStmt:
