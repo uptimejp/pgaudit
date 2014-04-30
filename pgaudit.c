@@ -664,6 +664,7 @@ log_utility_command(Node *parsetree,
  * for them.
  */
 
+#ifndef USE_DEPARSE_FUNCTIONS
 static void
 log_create_or_alter(bool create,
 					Oid classId,
@@ -777,6 +778,7 @@ log_create_or_alter(bool create,
 
 	log_audit_event(&e);
 }
+#endif
 
 /*
  * Create AuditEvents for non-catalog function execution, as detected by
