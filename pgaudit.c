@@ -561,13 +561,37 @@ log_utility_command(Node *parsetree,
 		case T_AlterTSDictionaryStmt:
 		case T_AlterTSConfigurationStmt:
 		case T_RenameStmt:
-		case T_AlterObjectSchemaStmt:
 		case T_AlterOwnerStmt:
 		case T_DropOwnedStmt:
 		case T_AlterDefaultPrivilegesStmt:
 #endif
 			supported_stmt = false;
 			break;
+
+#ifndef USE_DEPARSE_FUNCTIONS
+		/*
+		 * Exclude any ALTER <object> SET SCHEMA statements which
+		 * will be handled by log_object_access() in 9.3 and 9.4
+		 */
+		case  T_AlterObjectSchemaStmt:
+			{
+				AlterObjectSchemaStmt *stmt = (AlterObjectSchemaStmt *) parsetree;
+				switch(stmt->objectType)
+				{
+					case OBJECT_FOREIGN_TABLE:
+					case OBJECT_INDEX:
+					case OBJECT_MATVIEW:
+					case OBJECT_SEQUENCE:
+					case OBJECT_TABLE:
+					case OBJECT_TYPE:
+					case OBJECT_VIEW:
+						break;
+					default:
+						supported_stmt = false;
+				}
+			}
+			break;
+#endif
 
 		/*
 		 * The following statements are supported by event triggers for
@@ -710,7 +734,7 @@ log_create_or_alter(bool create,
 
 					case RELKIND_MATVIEW:
 						objtype = "MATERIALIZED VIEW";
-						/* Pretend that materialized views are a kind of table  */
+						/* Pretend that materialized views are a kind of table */
 						type = create ? T_CreateStmt : T_AlterTableStmt;
 						tag = create ? "CREATE MATERIALIZED VIEW" : "ALTER MATERIALIZED VIEW";
 						break;
@@ -953,7 +977,6 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 	SPI_finish();
 	MemoryContextSwitchTo(oldcontext);
 	MemoryContextDelete(tmpcontext);
-
 #endif
 
 	PG_RETURN_NULL();
