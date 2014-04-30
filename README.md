@@ -13,6 +13,22 @@ These are categorised as described below, and audit logging for each
 group of commands may be enabled or disabled by the superuser. Once
 enabled, however, audit logging may not be disabled by a user.
 
+The categories of commands are defined as follows:
+
+	read		Commands that read database objects (SELECT)
+	write		DML commands that modify database objects (e.g. INSERT)
+	privilege	DCL commands that are related to access privileges
+				(e.g. GRANT/REVOKE)
+	user		DDL commands that are related to database users
+				(e.g. CREATE/DROP/ALTER ROLE)
+	definition	User-level DDL commands (e.g. CREATE TABLE)
+	config		Administrator-level commands that change the database
+				configuration (e.g. CREATE LANGUAGE, CREATE OPERATOR
+				CLASS)
+	admin		Administrator-level commands that are not configuration
+				related (e.g. CLUSTER, VACUUM, REINDEX)
+	function	Function execution
+
 What about log_statement = 'all'?
 ---------------------------------
 
@@ -81,14 +97,10 @@ classes of commands to log. For example,
 pgaudit.log may be set to an empty string or "none" to disable logging,
 or to any combination of the following logging classes:
 
-	READ		SELECT commands
-	WRITE		INSERT, UPDATE, DELETE, TRUNCATE
-	PRIVILEGE	GRANT, REVOKE, etc.
-	USER		CREATE/DROP/ALTER ROLE
-	DEFINITION	DDL: CREATE/DROP/ALTER for tables, etc.
-	CONFIG		CREATE OPERATOR, etc.
-	ADMIN		VACUUM, REINDEX, ANALYSE, …
-	FUNCTION	Non-catalog function execution
+	read, write, privilege, user, definition, config, admin, function
+
+These classes are defined above. See the "CLASSES" file for a complete
+list of commands corresponding to each logging class.
 
 pgaudit.log may be set in postgresql.conf (to apply globally), or as a
 per-database or per-user setting:
