@@ -918,6 +918,12 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 	 * and compose one AuditEvent per object in the results.
 	 */
 
+	/*
+	 * XXX 'identity' and 'schema' will be changed to 'object_identity'
+	 * and 'schema_name' in an upcoming change to the deparse branch,
+	 * for consistency withthe existing 'pg_event_trigger_dropped_objects()'
+	 * function
+	 */
 	query_get_creation_commands =
 		"SELECT classid, objid, objsubid, UPPER(object_type), schema,"
 		" identity, command"
