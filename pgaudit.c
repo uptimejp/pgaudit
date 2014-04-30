@@ -28,6 +28,7 @@
 #include "access/xact.h"
 #include "catalog/catalog.h"
 #include "catalog/objectaccess.h"
+#include "catalog/pg_class.h"
 #include "commands/dbcommands.h"
 #include "catalog/pg_proc.h"
 #include "commands/event_trigger.h"
@@ -644,6 +645,136 @@ log_utility_command(Node *parsetree,
 }
 
 /*
+ * Create AuditEvents for certain kinds of CREATE and ALTER statements,
+ * as detected by log_object_access() in lieu of event trigger support
+ * for them.
+ */
+
+static void
+log_create_or_alter(bool create,
+					Oid classId,
+					Oid objectId,
+					int subId)
+{
+	AuditEvent e;
+	NodeTag type;
+	const char *tag;
+	const char *name;
+	const char *objtype;
+
+	switch (classId)
+	{
+		case RelationRelationId:
+			{
+				Relation rel;
+				Form_pg_class class;
+				char *relnsp;
+				char *relname;
+
+				rel = relation_open(objectId, NoLock);
+				class = RelationGetForm(rel);
+				relnsp = get_namespace_name(RelationGetNamespace(rel));
+				relname = RelationGetRelationName(rel);
+				name = quote_qualified_identifier(relnsp, relname);
+
+				switch (class->relkind)
+				{
+					case RELKIND_RELATION:
+						objtype = "TABLE";
+						type = create ? T_CreateStmt : T_AlterTableStmt;
+						tag = create ? "CREATE TABLE" : "ALTER TABLE";
+						break;
+
+					case RELKIND_SEQUENCE:
+						objtype = "SEQUENCE";
+						type = create ? T_CreateStmt : T_AlterSeqStmt;
+						tag = create ? "CREATE SEQUENCE" : "ALTER SEQUENCE";
+						break;
+
+					/*
+					 * We should handle the other RELKIND_xxx constants
+					 * here.
+					 */
+
+					default:
+						objtype = "UNKNOWN";
+						type = T_Invalid;
+						tag = "";
+						break;
+				}
+
+				relation_close(rel, NoLock);
+			}
+			break;
+
+		/*
+		 * We leave the remaining classIds to be handled by the
+		 * ProcessUtility_hook.
+		 */
+
+		default:
+			return;
+			break;
+	}
+
+	e.type = type;
+	e.object_id = name;
+	e.object_type = objtype;
+	e.command_tag = tag;
+	if (debug_query_string)
+		e.command_text = debug_query_string;
+	else
+		e.command_text = "";
+
+	log_audit_event(&e);
+}
+
+/*
+ * Create AuditEvents for non-catalog function execution, as detected by
+ * log_object_access() below.
+ */
+
+static void
+log_function_execution(Oid objectId)
+{
+	HeapTuple proctup;
+	Form_pg_proc proc;
+	const char *name;
+	AuditEvent e;
+
+	proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(objectId));
+	if (!proctup)
+		elog(ERROR, "cache lookup failed for function %u", objectId);
+	proc = (Form_pg_proc) GETSTRUCT(proctup);
+
+	/*
+	 * Logging execution of all pg_catalog functions would
+	 * make the log unusably noisy.
+	 */
+
+	if (IsSystemNamespace(proc->pronamespace))
+	{
+		ReleaseSysCache(proctup);
+		return;
+	}
+
+	name = quote_qualified_identifier(get_namespace_name(proc->pronamespace),
+									  NameStr(proc->proname));
+	ReleaseSysCache(proctup);
+
+	e.type = T_ExecuteStmt;
+	e.object_id = name;
+	e.object_type = "FUNCTION";
+	e.command_tag = "EXECUTE";
+	if (debug_query_string)
+		e.command_text = debug_query_string;
+	else
+		e.command_text = "";
+
+	log_audit_event(&e);
+}
+
+/*
  * Log object accesses (which is more about DDL than DML, even though it
  * sounds like the latter).
  */
@@ -655,66 +786,50 @@ log_object_access(ObjectAccessType access,
 				  int subId,
 				  void *arg)
 {
-	AuditEvent e;
-
 	switch (access)
 	{
-		case OAT_POST_CREATE:
-		case OAT_POST_ALTER:
-			/*
-			 * The event triggers defined above cover these cases, so we
-			 * ignore them. In theory we could provide limited backwards
-			 * compatibility here if event triggers aren't available.
-			 */
-			return;
+		case OAT_FUNCTION_EXECUTE:
+			log_function_execution(objectId);
 			break;
 
-		case OAT_FUNCTION_EXECUTE:
+		/*
+		 * We use OAT_POST_{CREATE,ALTER} only to provide limited
+		 * support for certain CREATE/ALTER commands in the absence of
+		 * usable event trigger support.
+		 */
+
+#ifndef USE_DEPARSE_FUNCTIONS
+		case OAT_POST_CREATE:
 			{
-				HeapTuple proctup;
-				Form_pg_proc proc;
-				const char *name;
+				ObjectAccessPostCreate *pc = arg;
 
-				proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(objectId));
-				if (!proctup)
-					elog(ERROR, "cache lookup failed for function %u", objectId);
-				proc = (Form_pg_proc) GETSTRUCT(proctup);
-
-				/*
-				 * Logging execution of all pg_catalog functions would
-				 * make the log unusably noisy.
-				 */
-
-				if (IsSystemNamespace(proc->pronamespace))
-				{
-					ReleaseSysCache(proctup);
+				if (pc->is_internal)
 					return;
-				}
 
-				name = quote_qualified_identifier(get_namespace_name(proc->pronamespace),
-												  NameStr(proc->proname));
-				ReleaseSysCache(proctup);
-
-				e.type = T_ExecuteStmt;
-				e.object_id = name;
-				e.object_type = "FUNCTION";
-				e.command_tag = "EXECUTE";
-				if (debug_query_string)
-					e.command_text = debug_query_string;
-				else
-					e.command_text = "";
+				log_create_or_alter(access == OAT_POST_CREATE, classId,
+									objectId, subId);
 			}
 			break;
+
+		case OAT_POST_ALTER:
+			{
+				ObjectAccessPostAlter *pa = arg;
+
+				if (pa->is_internal)
+					return;
+
+				log_create_or_alter(access == OAT_POST_CREATE, classId,
+									objectId, subId);
+			}
+			break;
+#endif
 
 		default:
 		case OAT_DROP:
 		case OAT_NAMESPACE_SEARCH:
 			/* Not relevant to our purposes. */
-			return;
 			break;
 	}
-
-	log_audit_event(&e);
 }
 
 /*
