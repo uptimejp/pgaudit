@@ -1,0 +1,28 @@
+This is a list of the logging classes supported by pgaudit (see README
+for the definitions) and the corresponding commands.
+
+read            SELECT
+
+write           INSERT
+                UPDATE
+                DELETE
+                TRUNCATE
+
+privilege       GRANT
+                REVOKE
+                ALTER DEFAULT PRIVILEGES
+                ALTER … OWNER …
+
+user            CREATE/DROP/ALTER ROLE
+
+definition      CREATE/DROP/ALTER TABLE/SEQUENCE/…
+
+config          CREATE LANGUAGE
+                …
+
+admin           CLUSTER
+                VACUUM
+                REINDEX
+                …
+
+function        (Non-catalog function execution)
