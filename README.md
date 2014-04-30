@@ -29,6 +29,11 @@ The categories of commands are defined as follows:
 				related (e.g. CLUSTER, VACUUM, REINDEX)
 	function	Function execution
 
+This code is released under the PostgreSQL licence, as given at
+http://www.postgresql.org/about/licence/
+
+Copyright is novated to the PostgreSQL Global Development Group.
+
 What about log_statement = 'all'?
 ---------------------------------
 
