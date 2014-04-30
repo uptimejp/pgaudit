@@ -29,3 +29,6 @@ What else pgaudit could do
 
 5. Use extensible reloptions (or a similar mechanism) to allow
    per-object auditing configuration.
+
+6. Use pg_event_trigger_get_deletion_commands(), once it has been
+   implemented, to provide deparsed DDL for DROP commands.
