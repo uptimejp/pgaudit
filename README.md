@@ -181,9 +181,7 @@ it more difficult to tell what happened.
 Some utility statements are audit-logged even though they subsequently
 fail (e.g. «set shared_buffers = '32MB'»).
 
-Deparsed query text is only available for CREATE, not DROP.
-
-'ALTER TABLE … DROP …' is logged twice (as a CREATE, then a DROP).
+Deparsed query text is not yet available for DROP events.
 
 Some bugs of varying severity in the deparse code have been reported
 upstream. Some have been fixed already, but the code is under active
