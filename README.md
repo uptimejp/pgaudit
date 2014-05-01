@@ -150,12 +150,15 @@ LOG:  [AUDIT],2014-04-30 17:16:18.291452+09,auditdb,ianb,ianb,ADMIN,VACUUM,,,VAC
 LOG:  [AUDIT],2014-04-30 17:18:01.08291+09,auditdb,ianb,ianb,DEFINITION,CREATE FUNCTION,FUNCTION,public.func_x(),CREATE  FUNCTION public.func_x() RETURNS  pg_catalog.int4 LANGUAGE sql  VOLATILE  CALLED ON NULL INPUT SECURITY INVOKER COST 100.000000   AS $dprs_$SELECT a FROM x LIMIT 1;$dprs_$
 LOG:  [AUDIT],2014-04-30 17:18:09.694755+09,auditdb,ianb,ianb,FUNCTION,EXECUTE,FUNCTION,public.func_x,SELECT * FROM func_x();
 LOG:  [AUDIT],2014-04-30 17:18:09.694865+09,auditdb,ianb,ianb,READ,SELECT,TABLE,public.x,SELECT * FROM func_x();
-CONTEXT:  SQL function "func_x" statement 1
 LOG:  [AUDIT],2014-04-30 17:18:33.703007+09,auditdb,ianb,ianb,WRITE,DELETE,VIEW,public.v_x,DELETE FROM v_x;
 LOG:  [AUDIT],2014-04-30 17:18:33.703051+09,auditdb,ianb,ianb,WRITE,DELETE,TABLE,public.x,DELETE FROM v_x;
 LOG:  [AUDIT],2014-04-30 17:19:54.811244+09,auditdb,ianb,ianb,ADMIN,SET,,,set role ams;
 LOG:  [AUDIT],2014-04-30 17:19:57.039979+09,auditdb,ianb,ams,WRITE,INSERT,VIEW,public.v_x,INSERT INTO v_x VALUES(1,2);
 LOG:  [AUDIT],2014-04-30 17:19:57.040014+09,auditdb,ianb,ams,WRITE,INSERT,TABLE,public.x,INSERT INTO v_x VALUES(1,2);
+LOG:  [AUDIT],2014-04-30 17:20:02.059415+09,auditdb,ianb,ams,ADMIN,SET,,,SET role ianb;
+LOG:  [AUDIT],2014-04-30 17:20:09.840261+09,auditdb,ianb,ianb,DEFINITION,ALTER TABLE,TABLE,public.x,ALTER TABLE public.x ADD COLUMN c pg_catalog.int4
+LOG:  [AUDIT],2014-04-30 17:23:58.920342+09,auditdb,ianb,ianb,ADMIN,ALTER ROLE,,,ALTER USER ams SET search_path = 'foo';
+
 
 Design overview
 ---------------
