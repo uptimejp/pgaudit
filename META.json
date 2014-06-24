@@ -5,7 +5,7 @@
     "release_status": "stable",
     "maintainer": [
         "Abhijit Menon-Sen <ams@2ndQuadrant.com>",
-        "Ian Barwick <ian.barwick@2ndQuadrant.com>",
+        "Ian Barwick <ian.barwick@2ndQuadrant.com>"
     ],
     "license": {
         "PostgreSQL": "http://www.postgresql.org/about/licence"
@@ -27,7 +27,7 @@
     },
     "resources": {
         "repository": {
-            "url":  "git@github.com:2ndQuadrant/pgaudit.git",
+            "url":  "git://github.com/2ndQuadrant/pgaudit.git",
             "web":  "https://github.com/2ndQuadrant/pgaudit",
             "type": "git"
         },
