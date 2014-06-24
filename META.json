@@ -1,0 +1,50 @@
+{
+    "name": "pgaudit",
+    "abstract": "An auditing extension for PostgreSQL",
+    "version": "1.0.0",
+    "release_status": "stable",
+    "maintainer": [
+        "Abhijit Menon-Sen <ams@2ndQuadrant.com>",
+        "Ian Barwick <ian.barwick@2ndQuadrant.com>",
+    ],
+    "license": {
+        "PostgreSQL": "http://www.postgresql.org/about/licence"
+    },
+    "prereqs": {
+        "runtime": {
+            "requires": {
+                "PostgreSQL": "9.3.0"
+            }
+        }
+    },
+    "provides": {
+        "pgaudit": {
+            "abstract": "An auditing extension for PostgreSQL",
+            "file": "pgaudit--1.0.0.sql",
+            "docfile": "README.md",
+            "version": "1.0.0"
+        }
+    },
+    "resources": {
+        "repository": {
+            "url":  "git@github.com:2ndQuadrant/pgaudit.git",
+            "web":  "https://github.com/2ndQuadrant/pgaudit",
+            "type": "git"
+        },
+        "bugtracker": {
+            "web": "https://github.com/2ndQuadrant/pgaudit/issues"
+        }
+    },
+    "meta-spec": {
+        "version": "1.0.0",
+        "url": "http://pgxn.org/meta/spec.txt"
+    },
+    "generated_by": "Ian Barwick",
+    "tags": [
+        "audit",
+        "auditing",
+        "logging",
+        "pgaudit",
+        "pg_audit"
+    ]
+}

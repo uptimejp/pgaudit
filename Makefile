@@ -12,7 +12,7 @@ OBJS = pgaudit.o
 
 EXTENSION = pgaudit
 
-DATA = pgaudit--0.1.sql
+DATA = pgaudit--1.0.0.sql
 
 ifdef USE_PGXS
 PG_CONFIG = pg_config
