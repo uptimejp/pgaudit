@@ -309,7 +309,7 @@ log_audit_event(AuditEvent *e)
 	 */
 
 	ereport(LOG,
-			(errmsg("[AUDIT],%s,%s,%s,%s,%s,%s,%s,%s,%s",
+			(errmsg("AUDIT,%s,%s,%s,%s,%s,%s,%s,%s,%s",
 					timestamp, database,
 					username, eusername, classname,
 					e->command_tag, e->object_type, e->object_id,
