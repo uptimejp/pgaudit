@@ -240,7 +240,7 @@ should_be_logged(AuditEvent *e, const char **classname)
 		case T_CreateEventTrigStmt:
 		case T_AlterEventTrigStmt:
 #if PG_VERSION_NUM >= 90400
-		case T_AlterTableSpaceMoveStmt:
+		case T_AlterTableMoveAllStmt:
 		case T_AlterSystemStmt:
 #endif
 			name = "ADMIN";
@@ -520,7 +520,7 @@ log_utility_command(Node *parsetree,
 		case T_CheckPointStmt:
 		case T_ReindexStmt:
 #if PG_VERSION_NUM >= 90400
-		case T_AlterTableSpaceMoveStmt:
+		case T_AlterTableMoveAllStmt:
 		case T_AlterSystemStmt:
 #endif
 
