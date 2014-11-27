@@ -58,6 +58,13 @@ PG_FUNCTION_INFO_V1(pgaudit_func_ddl_command_end);
 PG_FUNCTION_INFO_V1(pgaudit_func_sql_drop);
 
 /*
+ * pgaudit_roles_str is the string value of the pgaudit.roles
+ * configuration variable, which is a list of role names.
+ */
+
+char *pgaudit_roles_str = NULL;
+
+/*
  * pgaudit_log_str is the string value of the pgaudit.log configuration
  * variable, e.g. "read, write, user". Each token corresponds to a flag
  * in enum LogClass below. We convert the list of tokens into a bitmap
@@ -115,6 +122,40 @@ typedef struct {
 	const char *command_tag;
 	const char *command_text;
 } AuditEvent;
+
+/*
+ * Takes a role OID and returns true or false depending on whether
+ * auditing it enabled for that roles according to the pgaudit.roles
+ * setting.
+ */
+
+static bool
+role_is_audited(Oid roleid)
+{
+	List *roles;
+	ListCell *lt;
+
+	if (!SplitIdentifierString(pgaudit_roles_str, ',', &roles))
+		return false;
+
+	foreach(lt, roles)
+	{
+		char *name = (char *)lfirst(lt);
+		HeapTuple roleTup;
+
+		roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(name));
+		if (HeapTupleIsValid(roleTup))
+		{
+			Oid parentrole = HeapTupleGetOid(roleTup);
+
+			ReleaseSysCache(roleTup);
+			if (is_member_of_role(roleid, parentrole))
+				return true;
+		}
+	}
+
+	return false;
+}
 
 /*
  * Takes an AuditEvent and returns true or false depending on whether
@@ -289,18 +330,24 @@ should_be_logged(AuditEvent *e, const char **classname)
 static void
 log_audit_event(AuditEvent *e)
 {
+	Oid userid;
 	const char *timestamp;
 	const char *database;
 	const char *username;
 	const char *eusername;
 	const char *classname;
 
+	userid = GetSessionUserId();
+
+	if (!role_is_audited(userid))
+		return;
+
 	if (!should_be_logged(e, &classname))
 		return;
 
 	timestamp = timestamptz_to_str(GetCurrentTimestamp());
 	database = get_database_name(MyDatabaseId);
-	username = GetUserNameFromId(GetSessionUserId());
+	username = GetUserNameFromId(userid);
 	eusername = GetUserNameFromId(GetUserId());
 
 	/*
@@ -328,7 +375,7 @@ log_executor_check_perms(List *rangeTabls, bool abort_on_violation)
 {
 	ListCell *lr;
 
-	foreach (lr, rangeTabls)
+	foreach(lr, rangeTabls)
 	{
 		Relation rel;
 		AuditEvent e;
@@ -1127,6 +1174,32 @@ pgaudit_object_access_hook(ObjectAccessType access,
 }
 
 /*
+ * Take a pgaudit.roles value such as "role1, role2" and verify that
+ * the string consists of comma-separated tokens.
+ */
+
+static bool
+check_pgaudit_roles(char **newval, void **extra, GucSource source)
+{
+	List *roles;
+	char *rawval;
+
+	/* Make sure we have a comma-separated list of tokens. */
+
+	rawval = pstrdup(*newval);
+	if (!SplitIdentifierString(rawval, ',', &roles))
+	{
+		GUC_check_errdetail("List syntax is invalid");
+		list_free(roles);
+		pfree(rawval);
+		return false;
+	}
+	pfree(rawval);
+
+	return true;
+}
+
+/*
  * Take a pgaudit.log value such as "read, write, user", verify that
  * each of the comma-separated tokens corresponds to a LogClass value,
  * and convert them into a bitmap that log_audit_event can check.
@@ -1230,6 +1303,23 @@ _PG_init(void)
 		ereport(ERROR,
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("pgaudit must be loaded via shared_preload_libraries")));
+
+	/*
+	 * pgaudit.roles = "role1, role2"
+	 *
+	 * This variable defines a list of roles for which auditing is
+	 * enabled.
+	 */
+
+	DefineCustomStringVariable("pgaudit.roles",
+							   "Enable auditing for certain roles",
+							   NULL,
+							   &pgaudit_roles_str,
+							   "",
+							   PGC_SUSET,
+							   GUC_LIST_INPUT | GUC_NOT_IN_SAMPLE,
+							   check_pgaudit_roles,
+							   NULL, NULL);
 
 	/*
 	 * pgaudit.log = "read, write, user"
