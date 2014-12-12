@@ -135,6 +135,11 @@ role_is_audited(Oid roleid)
 	List *roles;
 	ListCell *lt;
 
+	/* If no roles are specified, then every role is audited. */
+
+	if (!pgaudit_roles_str || !*pgaudit_roles_str)
+		return true;
+
 	if (!SplitIdentifierString(pgaudit_roles_str, ',', &roles))
 		return false;
 
