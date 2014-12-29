@@ -121,12 +121,40 @@ typedef struct {
 	const char *object_type;
 	const char *command_tag;
 	const char *command_text;
+	bool granted;
 } AuditEvent;
 
 /*
- * Takes a role OID and returns true or false depending on whether
- * auditing it enabled for that roles according to the pgaudit.roles
- * setting.
+ * Returns the oid of the hardcoded "audit" role.
+ */
+
+static Oid
+audit_role_oid()
+{
+	HeapTuple roleTup;
+	Oid oid = InvalidOid;
+
+	roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum("audit"));
+	if (HeapTupleIsValid(roleTup)) {
+		oid = HeapTupleGetOid(roleTup);
+		ReleaseSysCache(roleTup);
+	}
+
+	return oid;
+}
+
+/* Returns true if either pgaudit.roles or pgaudit.log is set. */
+
+static inline bool
+pgaudit_configured()
+{
+	return (pgaudit_roles_str && *pgaudit_roles_str) || pgaudit_log != 0;
+}
+
+/*
+ * Takes a role OID and returns true if the role is mentioned in
+ * pgaudit.roles or if it inherits from a role mentioned therein;
+ * returns false otherwise.
  */
 
 static bool
@@ -135,10 +163,8 @@ role_is_audited(Oid roleid)
 	List *roles;
 	ListCell *lt;
 
-	/* If no roles are specified, then every role is audited. */
-
 	if (!pgaudit_roles_str || !*pgaudit_roles_str)
-		return true;
+		return false;
 
 	if (!SplitIdentifierString(pgaudit_roles_str, ',', &roles))
 		return false;
@@ -312,18 +338,21 @@ should_be_logged(Oid userid, AuditEvent *e, const char **classname)
 
 	*classname = name;
 
-	/* Does the pgaudit.roles setting apply to this user? */
-	if (!role_is_audited(userid))
-		return false;
-
 	/*
-	 * Is the applicable class mentioned in pgaudit.log?
+	 * We log audit events under the following conditions:
 	 *
-	 * XXX We consult only pgaudit_log now, but in future we may be able
-	 * to store relids in AuditEvent and use reloptions or some similar
-	 * mechanism to allow per-object logging configuration.
+	 * 1. If the audit role has been explicitly granted permission for
+	 *    an operation.
 	 */
 
+	if (e->granted)
+		return true;
+
+	/* 2. If the current user is covered by pgaudit.roles. */
+	if (role_is_audited(userid))
+		return true;
+
+	/* 3. If the event belongs to a class covered by pgaudit.log. */
 	if ((pgaudit_log & class) != class)
 		return false;
 
@@ -348,16 +377,6 @@ log_audit_event(AuditEvent *e)
 	const char *classname;
 
 	userid = GetSessionUserId();
-
-	/*
-	 * We log audit events under the following conditions:
-	 *
-	 * 1. If pgaudit.roles is set, then the current user must either be
-	 *    listed therein, or inherit from a role that is listed therein.
-	 *
-	 * 2. If pgaudit.log is set, the event must belong to a class for
-	 *    which logging is enabled.
-	 */
 
 	if (!should_be_logged(userid, e, &classname))
 		return;
@@ -388,7 +407,7 @@ log_audit_event(AuditEvent *e)
  */
 
 static void
-log_executor_check_perms(List *rangeTabls, bool abort_on_violation)
+log_executor_check_perms(Oid auditOid, List *rangeTabls, bool abort_on_violation)
 {
 	ListCell *lr;
 
@@ -490,11 +509,6 @@ log_executor_check_perms(List *rangeTabls, bool abort_on_violation)
 				break;
 		}
 
-		/*
-		 * XXX We could also decode rte->selectedCols and
-		 * rte->modifiedCols here.
-		 */
-
 		e.type = type;
 		e.object_id = relname;
 		e.object_type = reltype;
@@ -503,6 +517,39 @@ log_executor_check_perms(List *rangeTabls, bool abort_on_violation)
 			e.command_text = debug_query_string;
 		else
 			e.command_text = "";
+		e.granted = false;
+
+		/*
+		 * If a role named "audit" exists, we check if it has been
+		 * granted permission to perform the operation identified above.
+		 * If so, we must log the event regardless of the static pgaudit
+		 * settings.
+		 */
+
+		if (auditOid != InvalidOid)
+		{
+			AclMode		relPerms;
+			AclMode		remainingPerms;
+
+			relPerms = pg_class_aclmask(rte->relid, auditOid,
+										rte->requiredPerms, ACLMASK_ALL);
+
+			remainingPerms = rte->requiredPerms & ~relPerms;
+			if (remainingPerms == 0)
+				e.granted = true;
+
+			/*
+			 * If the audit role doesn't have the necessary permissions
+			 * on the relation, but could have the required permissions
+			 * through column-level grants, we check rte->selectedCols
+			 * and rte->modifiedCols to make sure.
+			 */
+
+			else if ((remainingPerms & ~(ACL_SELECT | ACL_INSERT | ACL_UPDATE)) == 0)
+			{
+				/* XXX */
+			}
+		}
 
 		log_audit_event(&e);
 
@@ -718,6 +765,7 @@ log_utility_command(Node *parsetree,
 	e.object_type = "";
 	e.command_tag = CreateCommandTag(parsetree);
 	e.command_text = queryString;
+	e.granted = false;
 
 	log_audit_event(&e);
 }
@@ -839,6 +887,7 @@ log_create_or_alter(bool create,
 		e.command_text = debug_query_string;
 	else
 		e.command_text = "";
+	e.granted = false;
 
 	log_audit_event(&e);
 }
@@ -885,6 +934,7 @@ log_function_execution(Oid objectId)
 		e.command_text = debug_query_string;
 	else
 		e.command_text = "";
+	e.granted = false;
 
 	log_audit_event(&e);
 }
@@ -970,7 +1020,7 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 	MemoryContext tmpcontext;
 	MemoryContext oldcontext;
 
-	if (pgaudit_log == 0)
+	if (!pgaudit_configured())
 		PG_RETURN_NULL();
 
 	if (!CALLED_AS_EVENT_TRIGGER(fcinfo))
@@ -1042,6 +1092,7 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 		e.object_type = SPI_getvalue(spi_tuple, spi_tupdesc, 4);
 		e.command_tag = trigdata->tag;
 		e.command_text = TextDatumGetCString(command);
+		e.granted = false;
 
 		log_audit_event(&e);
 	}
@@ -1071,7 +1122,7 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 	MemoryContext tmpcontext;
 	MemoryContext oldcontext;
 
-	if (pgaudit_log == 0)
+	if (!pgaudit_configured())
 		PG_RETURN_NULL();
 
 	if (!CALLED_AS_EVENT_TRIGGER(fcinfo))
@@ -1120,6 +1171,7 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 		e.object_type = SPI_getvalue(spi_tuple, spi_tupdesc, 4);
 		e.command_tag = trigdata->tag;
 		e.command_text = "";
+		e.granted = false;
 
 		log_audit_event(&e);
 	}
@@ -1146,8 +1198,11 @@ static object_access_hook_type next_object_access_hook = NULL;
 static bool
 pgaudit_ExecutorCheckPerms_hook(List *rangeTabls, bool abort)
 {
-	if (pgaudit_log != 0 && !IsAbortedTransactionBlockState())
-		log_executor_check_perms(rangeTabls, abort);
+	Oid auditOid = audit_role_oid();
+
+	if (!IsAbortedTransactionBlockState() &&
+		(auditOid != InvalidOid || pgaudit_configured()))
+		log_executor_check_perms(auditOid, rangeTabls, abort);
 
 	if (next_ExecutorCheckPerms_hook &&
 		!(*next_ExecutorCheckPerms_hook) (rangeTabls, abort))
@@ -1164,7 +1219,7 @@ pgaudit_ProcessUtility_hook(Node *parsetree,
 							DestReceiver *dest,
 							char *completionTag)
 {
-	if (pgaudit_log != 0 && !IsAbortedTransactionBlockState())
+	if (!IsAbortedTransactionBlockState() && pgaudit_configured())
 		log_utility_command(parsetree, queryString, context,
 							params, dest, completionTag);
 
@@ -1183,7 +1238,7 @@ pgaudit_object_access_hook(ObjectAccessType access,
 						   int subId,
 						   void *arg)
 {
-	if (pgaudit_log != 0 && !IsAbortedTransactionBlockState())
+	if (!IsAbortedTransactionBlockState() && pgaudit_configured())
 		log_object_access(access, classId, objectId, subId, arg);
 
 	if (next_object_access_hook)
