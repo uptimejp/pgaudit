@@ -344,6 +344,16 @@ log_audit_event(AuditEvent *e)
 
 	userid = GetSessionUserId();
 
+	/*
+	 * We log audit events under the following conditions:
+	 *
+	 * 1. If pgaudit.roles is set, then the current user must either be
+	 *    listed therein, or inherit from a role that is listed therein.
+	 *
+	 * 2. If pgaudit.log is set, the event must belong to a class for
+	 *    which logging is enabled.
+	 */
+
 	if (!role_is_audited(userid))
 		return;
 
