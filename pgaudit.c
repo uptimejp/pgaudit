@@ -163,14 +163,14 @@ role_is_audited(Oid roleid)
 }
 
 /*
- * Takes an AuditEvent and returns true or false depending on whether
- * the event should be logged according to the pgaudit.log setting. If
- * it returns true, it also fills in the name of the LogClass which it
- * is to be logged under.
+ * Takes a role OID and an AuditEvent and returns true or false
+ * depending on whether the event should be logged according to the
+ * pgaudit.roles/log settings. If it returns true, it also fills in the
+ * name of the LogClass which it is to be logged under.
  */
 
 static bool
-should_be_logged(AuditEvent *e, const char **classname)
+should_be_logged(Oid userid, AuditEvent *e, const char **classname)
 {
 	enum LogClass class = LOG_NONE;
 	char *name;
@@ -310,6 +310,12 @@ should_be_logged(AuditEvent *e, const char **classname)
 			break;
 	}
 
+	*classname = name;
+
+	/* Does the pgaudit.roles setting apply to this user? */
+	if (!role_is_audited(userid))
+		return false;
+
 	/*
 	 * Is the applicable class mentioned in pgaudit.log?
 	 *
@@ -321,7 +327,6 @@ should_be_logged(AuditEvent *e, const char **classname)
 	if ((pgaudit_log & class) != class)
 		return false;
 
-	*classname = name;
 	return true;
 }
 
@@ -354,10 +359,7 @@ log_audit_event(AuditEvent *e)
 	 *    which logging is enabled.
 	 */
 
-	if (!role_is_audited(userid))
-		return;
-
-	if (!should_be_logged(e, &classname))
+	if (!should_be_logged(userid, e, &classname))
 		return;
 
 	timestamp = timestamptz_to_str(GetCurrentTimestamp());
