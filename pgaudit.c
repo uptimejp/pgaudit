@@ -25,6 +25,7 @@
 #include "postgres.h"
 
 #include "access/htup_details.h"
+#include "access/sysattr.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
 #include "catalog/objectaccess.h"
@@ -413,6 +414,7 @@ log_executor_check_perms(Oid auditOid, List *rangeTabls, bool abort_on_violation
 
 	foreach(lr, rangeTabls)
 	{
+		Oid relOid;
 		Relation rel;
 		AuditEvent e;
 		RangeTblEntry *rte = lfirst(lr);
@@ -433,7 +435,8 @@ log_executor_check_perms(Oid auditOid, List *rangeTabls, bool abort_on_violation
 		 * pg_catalog?
 		 */
 
-		rel = relation_open(rte->relid, NoLock);
+		relOid = rte->relid;
+		rel = relation_open(relOid, NoLock);
 		relname = quote_qualified_identifier(get_namespace_name(RelationGetNamespace(rel)),
 											 RelationGetRelationName(rel));
 		relation_close(rel, NoLock);
@@ -531,7 +534,7 @@ log_executor_check_perms(Oid auditOid, List *rangeTabls, bool abort_on_violation
 			AclMode		relPerms;
 			AclMode		remainingPerms;
 
-			relPerms = pg_class_aclmask(rte->relid, auditOid,
+			relPerms = pg_class_aclmask(relOid, auditOid,
 										rte->requiredPerms, ACLMASK_ALL);
 
 			remainingPerms = rte->requiredPerms & ~relPerms;
@@ -547,7 +550,63 @@ log_executor_check_perms(Oid auditOid, List *rangeTabls, bool abort_on_violation
 
 			else if ((remainingPerms & ~(ACL_SELECT | ACL_INSERT | ACL_UPDATE)) == 0)
 			{
-				/* XXX */
+				int col;
+
+				/* This code is adapted from ExecCheckRTEPerms */
+
+				if (remainingPerms & ACL_SELECT)
+				{
+					if (bms_is_empty(rte->selectedCols))
+					{
+						if (pg_attribute_aclcheck_all(relOid, auditOid, ACL_SELECT,
+													  ACLMASK_ANY) == ACLCHECK_OK)
+							e.granted = true;
+					}
+
+					col = -1;
+					while ((col = bms_next_member(rte->selectedCols, col)) >= 0)
+					{
+						AttrNumber	attno = col + FirstLowInvalidHeapAttributeNumber;
+
+						if (attno == InvalidAttrNumber)
+						{
+							if (pg_attribute_aclcheck_all(relOid, auditOid, ACL_SELECT,
+														  ACLMASK_ALL) == ACLCHECK_OK)
+								e.granted = true;
+						}
+						else
+						{
+							if (pg_attribute_aclcheck(relOid, attno, auditOid,
+													  ACL_SELECT) == ACLCHECK_OK)
+								e.granted = true;
+						}
+					}
+				}
+
+				remainingPerms &= ~ACL_SELECT;
+				if (remainingPerms != 0)
+				{
+					if (bms_is_empty(rte->modifiedCols))
+					{
+						if (pg_attribute_aclcheck_all(relOid, auditOid,
+													  remainingPerms,
+													  ACLMASK_ANY) != ACLCHECK_OK)
+							e.granted = true;
+					}
+
+					col = -1;
+					while ((col = bms_next_member(rte->modifiedCols, col)) >= 0)
+					{
+						AttrNumber	attno = col + FirstLowInvalidHeapAttributeNumber;
+
+						if (attno != InvalidAttrNumber)
+						{
+							if (pg_attribute_aclcheck(relOid, attno, auditOid,
+													  remainingPerms) == ACLCHECK_OK)
+								e.granted = true;
+						}
+					}
+				}
 			}
 		}
 
