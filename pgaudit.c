@@ -550,7 +550,8 @@ log_executor_check_perms(Oid auditOid, List *rangeTabls, bool abort_on_violation
 
 			else if ((remainingPerms & ~(ACL_SELECT | ACL_INSERT | ACL_UPDATE)) == 0)
 			{
-				int col;
+				AttrNumber col;
+				Bitmapset *tmpset;
 
 				/* This code is adapted from ExecCheckRTEPerms */
 
@@ -563,12 +564,12 @@ log_executor_check_perms(Oid auditOid, List *rangeTabls, bool abort_on_violation
 							e.granted = true;
 					}
 
-					col = -1;
-					while ((col = bms_next_member(rte->selectedCols, col)) >= 0)
+					tmpset = bms_copy(rte->selectedCols);
+					while ((col = bms_first_member(tmpset)) >= 0)
 					{
-						AttrNumber	attno = col + FirstLowInvalidHeapAttributeNumber;
+						col += FirstLowInvalidHeapAttributeNumber;
 
-						if (attno == InvalidAttrNumber)
+						if (col == InvalidAttrNumber)
 						{
 							if (pg_attribute_aclcheck_all(relOid, auditOid, ACL_SELECT,
 														  ACLMASK_ALL) == ACLCHECK_OK)
@@ -576,11 +577,12 @@ log_executor_check_perms(Oid auditOid, List *rangeTabls, bool abort_on_violation
 						}
 						else
 						{
-							if (pg_attribute_aclcheck(relOid, attno, auditOid,
+							if (pg_attribute_aclcheck(relOid, col, auditOid,
 													  ACL_SELECT) == ACLCHECK_OK)
 								e.granted = true;
 						}
 					}
+					bms_free(tmpset);
 				}
 
 				remainingPerms &= ~ACL_SELECT;
@@ -594,18 +596,19 @@ log_executor_check_perms(Oid auditOid, List *rangeTabls, bool abort_on_violation
 							e.granted = true;
 					}
 
-					col = -1;
-					while ((col = bms_next_member(rte->modifiedCols, col)) >= 0)
+					tmpset = bms_copy(rte->modifiedCols);
+					while ((col = bms_first_member(tmpset)) >= 0)
 					{
-						AttrNumber	attno = col + FirstLowInvalidHeapAttributeNumber;
+						col += FirstLowInvalidHeapAttributeNumber;
 
-						if (attno != InvalidAttrNumber)
+						if (col != InvalidAttrNumber)
 						{
-							if (pg_attribute_aclcheck(relOid, attno, auditOid,
+							if (pg_attribute_aclcheck(relOid, col, auditOid,
 													  remainingPerms) == ACLCHECK_OK)
 								e.granted = true;
 						}
 					}
+					bms_free(tmpset);
 				}
 			}
 		}
