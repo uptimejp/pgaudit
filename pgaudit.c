@@ -181,7 +181,7 @@ role_is_audited(Oid roleid)
 			Oid parentrole = HeapTupleGetOid(roleTup);
 
 			ReleaseSysCache(roleTup);
-			if (is_member_of_role(roleid, parentrole))
+			if (is_member_of_role_nosuper(roleid, parentrole))
 				return true;
 		}
 	}
