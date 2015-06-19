@@ -384,9 +384,14 @@ log_audit_event(AuditEvent *e)
 
 	timestamp = timestamptz_to_str(GetCurrentTimestamp());
 	database = get_database_name(MyDatabaseId);
+
+#if PG_VERSION_NUM >= 90500
+	username = GetUserNameFromId(userid, true);
+	eusername = GetUserNameFromId(GetUserId(), true);
+#else
 	username = GetUserNameFromId(userid);
 	eusername = GetUserNameFromId(GetUserId());
-
+#endif
 	/*
 	 * XXX We only support logging via ereport(). In future, we may log
 	 * to a separate file or a table.
@@ -400,6 +405,48 @@ log_audit_event(AuditEvent *e)
 					e->command_text),
 			 errhidestmt(true)));
 }
+
+#if PG_VERSION_NUM >= 90500
+/* This code is adapted from ExecCheckRTEPermsModified */
+static bool
+check_perms_modified(Oid relOid, Oid userid, Bitmapset *modifiedCols,
+					AclMode requiredPerms)
+{
+int			col = -1;
+
+	/*
+	 * When the query doesn't explicitly update any columns, allow the query
+	 * if we have permission on any column of the rel.  This is to handle
+	 * SELECT FOR UPDATE as well as possible corner cases in UPDATE.
+	 */
+	if (bms_is_empty(modifiedCols))
+	{
+		if (pg_attribute_aclcheck_all(relOid, userid, requiredPerms,
+									  ACLMASK_ANY) != ACLCHECK_OK)
+			return false;
+	}
+
+	while ((col = bms_next_member(modifiedCols, col)) >= 0)
+	{
+		/* bit #s are offset by FirstLowInvalidHeapAttributeNumber */
+		AttrNumber	attno = col + FirstLowInvalidHeapAttributeNumber;
+
+		if (attno == InvalidAttrNumber)
+		{
+			/* whole-row reference can't happen here */
+			elog(ERROR, "whole-row update is not implemented");
+		}
+		else
+		{
+			if (pg_attribute_aclcheck(relOid, attno, userid,
+									  requiredPerms) != ACLCHECK_OK)
+				return false;
+		}
+	}
+	return true;
+
+}
+#endif
 
 /*
  * Create AuditEvents for DML operations via executor permissions
@@ -585,6 +632,23 @@ log_executor_check_perms(Oid auditOid, List *rangeTabls, bool abort_on_violation
 					bms_free(tmpset);
 				}
 
+#if PG_VERSION_NUM >= 90500
+				if (remainingPerms & ACL_INSERT && !check_perms_modified(relOid,
+																		 auditOid,
+																		 rte->insertedCols,
+																		 ACL_INSERT))
+				{
+					e.granted = true;
+				}
+
+				if (remainingPerms & ACL_UPDATE && !check_perms_modified(relOid,
+																		 auditOid,
+																		 rte->updatedCols,
+																		 ACL_UPDATE))
+				{
+					e.granted = true;
+				}
+#else
 				remainingPerms &= ~ACL_SELECT;
 				if (remainingPerms != 0)
 				{
@@ -610,6 +674,7 @@ log_executor_check_perms(Oid auditOid, List *rangeTabls, bool abort_on_violation
 					}
 					bms_free(tmpset);
 				}
+#endif
 			}
 		}
 
