@@ -66,13 +66,13 @@ Installation
 The latest pgaudit code is available at
 https://github.com/2ndQuadrant/pgaudit
 
-This module will work with Postgres 9.3 and 9.4 (not yet released at the
-time of writing), but it needs updated event trigger code in order to
-log a complete, unambiguous representation of DDL commands.
+This module will work with Postgres 9.3 and 9.4, but it needs updated event
+trigger code in order to log a complete, unambiguous representation of DDL
+commands.
 
 We hope that the necessary event trigger code will be available in 9.5,
 but until then you will have to build your own Postgres to see pgaudit
-at its best. The necessary code is available in the deparse branch of
+at its best. The necessary code is available in the dev/deparse branch of
 git://git.postgresql.org/git/2ndquadrant_bdr.git
 
 First, build and install Postgres as usual from the deparse branch. Copy
