@@ -385,7 +385,7 @@ log_audit_event(AuditEvent *e)
 	timestamp = timestamptz_to_str(GetCurrentTimestamp());
 	database = get_database_name(MyDatabaseId);
 
-#if PG_VERSION_NUM >= 90500
+#if PG_VERSION_NUM >= 90500 && !defined(USE_DEPARSE_FUNCTIONS)
 	username = GetUserNameFromId(userid, true);
 	eusername = GetUserNameFromId(GetUserId(), true);
 #else
@@ -406,7 +406,7 @@ log_audit_event(AuditEvent *e)
 			 errhidestmt(true)));
 }
 
-#if PG_VERSION_NUM >= 90500
+#if PG_VERSION_NUM >= 90500 && !defined(USE_DEPARSE_FUNCTIONS)
 /* This code is adapted from ExecCheckRTEPermsModified */
 static bool
 check_perms_modified(Oid relOid, Oid userid, Bitmapset *modifiedCols,
@@ -632,7 +632,7 @@ log_executor_check_perms(Oid auditOid, List *rangeTabls, bool abort_on_violation
 					bms_free(tmpset);
 				}
 
-#if PG_VERSION_NUM >= 90500
+#if PG_VERSION_NUM >= 90500 && !defined(USE_DEPARSE_FUNCTIONS)
 				if (remainingPerms & ACL_INSERT && !check_perms_modified(relOid,
 																		 auditOid,
 																		 rte->insertedCols,
