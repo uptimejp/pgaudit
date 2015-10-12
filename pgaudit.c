@@ -122,8 +122,13 @@ typedef struct {
 	const char *object_type;
 	const char *command_tag;
 	const char *command_text;
+	uint32 es_processed;
 	bool granted;
 } AuditEvent;
+
+#define ES_Processed_Invalid (-1)
+
+static AuditEvent previous_event;
 
 /*
  * Returns the oid of the hardcoded "audit" role.
@@ -397,13 +402,23 @@ log_audit_event(AuditEvent *e)
 	 * to a separate file or a table.
 	 */
 
-	ereport(LOG,
-			(errmsg("AUDIT,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s",
-					timestamp, database,
-					username, eusername, application_name, classname,
-					e->command_tag, e->object_type, e->object_id,
-					e->command_text),
-			 errhidestmt(true)));
+	if (e->es_processed == ES_Processed_Invalid)
+		ereport(LOG,
+				(errmsg("AUDIT,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s",
+						timestamp, database,
+						username, eusername, application_name, classname,
+						e->command_tag, e->object_type, e->object_id,
+						e->command_text),
+				 errhidestmt(true)));
+	else
+		ereport(LOG,
+				(errmsg("AUDIT,%s,%s,%s,%s,%s,%s,%s,%s,%d,%s",
+						timestamp, database,
+						username, eusername, application_name, classname,
+						e->command_tag, e->object_type,
+						e->es_processed,
+						e->command_text),
+				 errhidestmt(true)));
 }
 
 #if PG_VERSION_NUM >= 90500 && !defined(USE_DEPARSE_FUNCTIONS)
@@ -678,7 +693,9 @@ log_executor_check_perms(Oid auditOid, List *rangeTabls, bool abort_on_violation
 			}
 		}
 
+		e.es_processed = ES_Processed_Invalid;
 		log_audit_event(&e);
+		previous_event = e;
 
 		pfree(relname);
 	}
@@ -894,7 +911,9 @@ log_utility_command(Node *parsetree,
 	e.command_text = queryString;
 	e.granted = false;
 
+	e.es_processed = ES_Processed_Invalid;
 	log_audit_event(&e);
+	previous_event = e;
 }
 
 /*
@@ -1016,7 +1035,9 @@ log_create_or_alter(bool create,
 		e.command_text = "";
 	e.granted = false;
 
+	e.es_processed = ES_Processed_Invalid;
 	log_audit_event(&e);
+	previous_event = e;
 }
 #endif
 
@@ -1063,7 +1084,9 @@ log_function_execution(Oid objectId)
 		e.command_text = "";
 	e.granted = false;
 
+	e.es_processed = ES_Processed_Invalid;
 	log_audit_event(&e);
+	previous_event = e;
 }
 
 /*
@@ -1221,7 +1244,9 @@ pgaudit_func_ddl_command_end(PG_FUNCTION_ARGS)
 		e.command_text = TextDatumGetCString(command);
 		e.granted = false;
 
+		e.es_processed = ES_Processed_Invalid;
 		log_audit_event(&e);
+		previous_event = e;
 	}
 
 	SPI_finish();
@@ -1300,7 +1325,9 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
 		e.command_text = "";
 		e.granted = false;
 
+		e.es_processed = ES_Processed_Invalid;
 		log_audit_event(&e);
+		previous_event = e;
 	}
 
 	SPI_finish();
@@ -1318,9 +1345,28 @@ pgaudit_func_sql_drop(PG_FUNCTION_ARGS)
  * must not call any logging functions from an aborted transaction.
  */
 
+static ExecutorEnd_hook_type next_ExecutorEnd_hook= NULL;
 static ExecutorCheckPerms_hook_type next_ExecutorCheckPerms_hook = NULL;
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type next_object_access_hook = NULL;
+
+static void
+pgaudit_ExecutorEnd_hook(QueryDesc *queryDesc)
+{
+	elog(LOG, "pgaudit_ExecutorEnd_hook");
+
+	previous_event.es_processed = queryDesc->estate->es_processed;
+	log_audit_event(&previous_event);
+
+	if (next_ExecutorEnd_hook)
+	{
+		(*next_ExecutorEnd_hook) (queryDesc);
+	}
+	else
+	{
+		standard_ExecutorEnd(queryDesc);
+	}
+}
 
 static bool
 pgaudit_ExecutorCheckPerms_hook(List *rangeTabls, bool abort)
@@ -1541,6 +1587,9 @@ _PG_init(void)
 	 * Install our hook functions after saving the existing pointers
 	 * to preserve the chain.
 	 */
+
+	next_ExecutorEnd_hook = ExecutorEnd_hook;
+	ExecutorEnd_hook = pgaudit_ExecutorEnd_hook;
 
 	next_ExecutorCheckPerms_hook = ExecutorCheckPerms_hook;
 	ExecutorCheckPerms_hook = pgaudit_ExecutorCheckPerms_hook;
